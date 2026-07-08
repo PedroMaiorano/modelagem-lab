@@ -1,0 +1,47 @@
+# Claude Code — permissões pessoais
+.claude/settings.local.json
+
+# Segredos
+.env
+*.env
+**/credentials*
+*.key
+
+# Cache de literatura (imutável, não versionar payloads)
+data/papers/
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+
+# Modelos serializados e artefatos pesados
+*.joblib
+*.pkl
+*.pickle
+models/*.bin
+
+# Dados brutos pesados (versionar por referência, não payload)
+*.csv
+*.parquet
+*.feather
+*.txt.gz
+
+# SO / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
