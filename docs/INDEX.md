@@ -5,6 +5,7 @@ Mapa da base de conhecimento do lab.
 ## Referências (`docs/referencias/`)
 - [sota-tracker-modelagem](referencias/sota-tracker-modelagem.md) — estado da arte: seleção de variáveis, modelos, AutoML, causal ML. **Coração do lab.**
 - [apis-fontes-abertas](referencias/apis-fontes-abertas.md) — APIs acadêmicas abertas (arXiv, Semantic Scholar, OpenAlex, CrossRef, Europe PMC/PubMed): endpoints, limites, exemplos.
+- [datasets](referencias/datasets.md) — datasets disponíveis em `data/` (gitignored, reproduzíveis via script), incluindo `credito_real` (UCI, dado real de crédito).
 
 ## Algoritmos Originais (`docs/algoritmos-originais/`)
 - [pedro-wise-resumo](algoritmos-originais/pedro-wise-resumo.md) — lógica do Pedro_Wise, anti-padrões e plano de port (**pilar 1**).
