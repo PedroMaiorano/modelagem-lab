@@ -12,6 +12,7 @@ Mapa da base de conhecimento do lab.
 
 ## Literatura (`docs/literatura/`)
 Wiki de técnicas documentadas — populada pelo `literature-scout`. Ver [README](literatura/README.md).
+- [stability-selection](literatura/stability-selection.md) — meta-procedimento de estabilização de seleção de variáveis; achado do Faletto & Bien (2022) sobre falha com proxies correlacionados, conectado ao forward duplo do Pedro_Wise.
 
 ## Guias (`docs/guias/`)
 - [fluxo-de-trabalho](guias/fluxo-de-trabalho.md) — como os 3 pilares e os agentes/skills se encaixam.

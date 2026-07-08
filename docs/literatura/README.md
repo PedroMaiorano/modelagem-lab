@@ -19,4 +19,5 @@ pelo agente `literature-scout` (skill `buscar-literatura`).
 ## Conexão com o acervo (Pedro_Wise / seleção de variáveis / outro)
 ```
 
-Vazio por ora — cresce sob demanda quando a skill `buscar-literatura` roda pela primeira vez.
+## Tópicos cobertos
+- [stability-selection](stability-selection.md) — 2026-07-07.

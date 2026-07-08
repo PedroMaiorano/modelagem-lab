@@ -16,6 +16,11 @@ import requests
 
 from scraping._common import CONTATO, USER_AGENT, Paper, RateLimiter, escrever_cache, ler_cache
 
+# Titulos podem trazer caracteres fora do cp1252 do console Windows; forca utf-8 na saida.
+_reconfigure = getattr(sys.stdout, "reconfigure", None)
+if _reconfigure is not None and sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    _reconfigure(encoding="utf-8", errors="replace")
+
 ENDPOINT = "https://api.crossref.org/works"
 _limiter = RateLimiter(intervalo_minimo_s=1.0)
 

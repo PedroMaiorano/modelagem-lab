@@ -37,6 +37,14 @@ o Pedro_Wise vive), **embedded** (seleção durante o treino — o SOTA atual).
 ### Robustez / controle de falsos positivos (SOTA)
 - **Stability selection**: reamostra e mantém variáveis selecionadas com frequência
   alta; controla falsos positivos. Competitiva com o SOTA em alta dimensão.
+  Ver síntese completa em [`docs/literatura/stability-selection.md`](../literatura/stability-selection.md).
+  **Cautela** (Faletto & Bien 2022): com lasso puro, falha quando há proxies
+  correlacionados de um fator latente — nenhum atinge frequência alta individualmente,
+  podendo ficar pior que o método base sem estabilização. Use *cluster stability
+  selection* (agrupar variáveis correlacionadas antes) quando esse cenário for
+  plausível. Não é o mesmo problema que a semântica de "base" do Pedro_Wise resolve
+  (essa agrupa *transformações da mesma variável*, não variáveis diferentes e
+  correlacionadas) — mecanismos complementares.
 - **Shadow-variable probing**: aumenta os dados com versões permutadas ("shadow") e para
   o forward quando uma shadow entraria — seleção em um único fit, **quase sem tuning**.
 
