@@ -117,7 +117,12 @@ Se a pergunta é sobre **efeito/intervenção**, seleção preditiva de variáve
 O Pedro_Wise é um wrapper stepwise otimizando KS. No port Python, ele deve **conviver**
 com as alternativas acima: métrica plugável abre caminho para AUC/Gini/log-loss/AIC/BIC;
 estimador plugável abre para boosting. Comparar o Pedro_Wise portado contra LASSO/elastic
-net e stability selection no mesmo dataset é um experimento natural do lab.
+net e stability selection no mesmo dataset é um experimento natural do lab — **feito em
+2026-07-07**, ver [`docs/experimentos/pedro-wise-vs-alternativas.md`](../experimentos/pedro-wise-vs-alternativas.md).
+Achado central: LASSO e stability selection cravaram o modelo exato (zero ruído); o
+Pedro_Wise aceitou 1 variável de ruído por otimizar KS contra um split de teste fixo —
+reforça usar `criterio="min"` (KS mínimo entre dev/teste) em vez de `"teste"` sozinho
+quando o custo de falso positivo de variável for alto.
 
 ---
 
