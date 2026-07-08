@@ -4,7 +4,7 @@
 > técnicas clássicas e SOTA, com foco em **seleção de variáveis, construção de modelos
 > e análises**. Agnóstico de domínio; risco de crédito é um caso de uso suportado,
 > não o único. Três pilares: (1) port+melhoria do algoritmo Pedro_Wise (R→Python),
-> (2) scraping de literatura acadêmica aberta, (3) preparo para interface futura.
+> (2) scraping de literatura acadêmica aberta, (3) interface (dashboard Streamlit em `app/`).
 
 ---
 
@@ -18,9 +18,9 @@ r-script:  Rscript r/<arquivo>.R
 scraper:   python scraping/arxiv_client.py --query 'cat:stat.ML AND all:"variable selection"' --max 10
 benchmark: python scripts/benchmark_paralelizacao.py
 validar:   Rscript scripts/validar_port_r.R && python scripts/validar_port_python.py
+app:       python -m streamlit run app/streamlit_app.py   # ver nota Windows em docs/planos/interface-streamlit.md
 ```
-> Pilares 1 (port Pedro_Wise) e 2 (scraping de literatura) implementados e testados.
-> Pilar 3 (interface) segue dormente — só ativa a skill `scaffold-interface` quando pedido.
+> Pilares 1 (port Pedro_Wise), 2 (scraping de literatura) e 3 (interface, v1) implementados e testados.
 > Todo código Python novo é type-hinted, testado e lintado.
 
 ---
@@ -38,7 +38,7 @@ validar:   Rscript scripts/validar_port_r.R && python scripts/validar_port_pytho
 - Nunca fazer scraping de paywall, Sci-Hub, ou qualquer fonte fechada. Só fontes 100% abertas (arXiv, Semantic Scholar, OpenAlex, CrossRef, Europe PMC/PubMed, repositórios OA). Ver `docs/referencias/apis-fontes-abertas.md`.
 - Nunca reproduzir os anti-padrões do R original no port (ver seção 7): `rbind` em loop, refit total por teste, `cat()` como log, recursão sem memoização.
 - Nunca commitar sem pedido explícito do usuário. Nunca commitar `.env`, dados brutos pesados ou credenciais.
-- Nunca construir a interface (pilar 3) agora — apenas manter `scaffold-interface` pronta para quando o usuário pedir.
+- Nunca reimplementar lógica de seleção/métrica em `app/` — a interface só consome `python/pedro_wise` via `app/logica.py`.
 - Nunca comentar O QUÊ o código faz — só o PORQUÊ não-óbvio.
 
 ---
@@ -62,7 +62,7 @@ validar:   Rscript scripts/validar_port_r.R && python scripts/validar_port_pytho
 | `port-r-python` | skill | Workflow passo-a-passo de port R→Python (usa `algorithm-porter`). |
 | `buscar-literatura` | skill | Workflow de busca acadêmica com comandos concretos por API. |
 | `selecao-variaveis` | skill | Workflow de seleção de variáveis (forward/backward/stepwise, regularização, boosting, stability selection). |
-| `scaffold-interface` | skill | **Dormente** — scaffolding de Streamlit/FastAPI/Shiny. Só ativa quando o usuário pedir a interface. |
+| `scaffold-interface` | skill | Scaffolding de Streamlit/FastAPI/Shiny. **Já ativada uma vez** (v1 do dashboard em `app/`, ver `docs/planos/interface-streamlit.md`) — reutilizar para expandir a interface, não para recomeçar do zero. |
 
 ---
 
@@ -87,14 +87,16 @@ modelagem-lab/
 │   │   ├── Pedro_Wise_3.0.1.R          # cópia fiel do algoritmo original
 │   │   └── pedro-wise-resumo.md        # lógica + anti-padrões + plano de port
 │   ├── literatura/                     # técnicas documentadas (wiki, por literature-scout)
+│   ├── experimentos/                   # comparações Pedro_Wise vs. alternativas, com achados
 │   ├── guias/                          # guias de uso
 │   ├── planos/                         # decisões de arquitetura/config
 │   └── INDEX.md                        # mapa da wiki
 ├── python/pedro_wise/                  # port completo (níveis 1-3), métrica/estimador plugáveis
+├── app/                                # dashboard Streamlit (pilar 3) — consome python/pedro_wise
 ├── r/                                  # protótipos/originais em R
 ├── scraping/                           # clients de APIs abertas (arXiv, S2, OpenAlex, CrossRef, Europe PMC)
-├── scripts/                            # benchmark, validação R↔Python, geração de dataset sintético
-├── tests/                              # pytest (34 testes: port + scraping)
+├── scripts/                            # benchmark, validação R↔Python, experimentos, geração de datasets
+├── tests/                              # pytest (40 testes: port + scraping)
 ├── notebooks/                          # exploração ad-hoc
 └── data/papers/                        # cache imutável de metadados (gitignored)
 ```

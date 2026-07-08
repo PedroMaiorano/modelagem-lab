@@ -24,3 +24,4 @@ Wiki de técnicas documentadas — populada pelo `literature-scout`. Ver [README
 
 ## Planos (`docs/planos/`)
 - [modelagem-lab-config](planos/modelagem-lab-config.md) — decisões de arquitetura da configuração Claude Code deste lab.
+- [interface-streamlit](planos/interface-streamlit.md) — decisão de framework e escopo do pilar 3 (dashboard em `app/`).

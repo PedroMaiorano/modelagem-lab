@@ -1,0 +1,6 @@
+# Dependências da interface (pilar 3), separadas do core (python/pedro_wise).
+# O core em si é importado diretamente do repo (ver logica.py), não instalado
+# como pacote — mesmas dependências de python/ (statsmodels, scikit-learn,
+# scipy, pandas, numpy) também precisam estar disponíveis.
+streamlit>=1.59
+pandas>=2.0
