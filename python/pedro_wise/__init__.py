@@ -12,6 +12,7 @@ from pedro_wise.level3 import run_pedro_wise_completo
 from pedro_wise.metrics import AUCMetric, KSGaussianMetric
 from pedro_wise.pipeline import run_pedro_wise
 from pedro_wise.selection import backward_simples, forward_simples, run_level1, transformacao_simples
+from pedro_wise.shadow_probing import adicionar_variaveis_sombra, eh_sombra
 from pedro_wise.types import (
     CandidateResult,
     Estimator,
@@ -22,6 +23,7 @@ from pedro_wise.types import (
     Metric,
     SearchTrace,
     SelectionState,
+    ShadowProbingConfig,
 )
 
 __all__ = [
@@ -41,6 +43,8 @@ __all__ = [
     "forward_simples",
     "run_level1",
     "transformacao_simples",
+    "adicionar_variaveis_sombra",
+    "eh_sombra",
     "CandidateResult",
     "Estimator",
     "Level1Config",
@@ -50,4 +54,5 @@ __all__ = [
     "Metric",
     "SearchTrace",
     "SelectionState",
+    "ShadowProbingConfig",
 ]

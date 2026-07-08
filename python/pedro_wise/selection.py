@@ -207,16 +207,28 @@ def run_level1(
         melhorou = False
 
         if config.forward_simples:
-            candidatos = forward_simples(estimator, metric, df_dev, df_teste, estado.variables, config.n_jobs)
-            melhor = _melhor(candidatos)
-            if melhor is not None and melhor.score > estado.score and melhor.model is not None:
-                nova_var = melhor.added[0]
-                estado = SelectionState(
-                    variables=(*estado.variables, nova_var), model=melhor.model, score=melhor.score
+            from pedro_wise.shadow_probing import deve_parar  # import tardio evita ciclo
+
+            parar_por_sombra = deve_parar(
+                estimator, metric, df_dev, df_teste, estado.variables, config.shadow_probing
+            )
+            if parar_por_sombra:
+                trace.registrar("shadow_probing: parada do forward — próxima candidata seria ruído")
+                logger.info("Shadow probing: forward_simples suspenso nesta rodada (limite de ruído)")
+
+            if not parar_por_sombra:
+                candidatos = forward_simples(
+                    estimator, metric, df_dev, df_teste, estado.variables, config.n_jobs
                 )
-                melhorou = True
-                trace.registrar(f"forward_simples: +{nova_var} => score={melhor.score:.4f}")
-                logger.info("forward_simples: +%s => score=%.4f", nova_var, melhor.score)
+                melhor = _melhor(candidatos)
+                if melhor is not None and melhor.score > estado.score and melhor.model is not None:
+                    nova_var = melhor.added[0]
+                    estado = SelectionState(
+                        variables=(*estado.variables, nova_var), model=melhor.model, score=melhor.score
+                    )
+                    melhorou = True
+                    trace.registrar(f"forward_simples: +{nova_var} => score={melhor.score:.4f}")
+                    logger.info("forward_simples: +%s => score=%.4f", nova_var, melhor.score)
 
         if config.transformacao_simples:
             candidatos = transformacao_simples(

@@ -86,6 +86,22 @@ N_JOBS_PADRAO = 4
 
 
 @dataclass(frozen=True)
+class ShadowProbingConfig:
+    """Critério de parada opt-in via shadow-variable probing (Thomas et al. 2017)
+    — ver `docs/literatura/shadow-variable-probing.md` e `shadow_probing.py`.
+
+    `ativado=False` por padrão: sem custo extra a menos que explicitamente ligado.
+    Quando ligado, cada rodada do forward simples paga um scan extra (variáveis
+    reais disponíveis + suas sombras) antes de aceitar a candidata vencedora.
+    """
+
+    ativado: bool = False
+    sufixo: str = "__shadow"
+    semente: int | None = None
+    n_jobs: int = N_JOBS_PADRAO
+
+
+@dataclass(frozen=True)
 class Level1Config:
     """Flags liga/desliga do nível 1, análogas aos parâmetros `*_nivel_1` do R."""
 
@@ -94,6 +110,7 @@ class Level1Config:
     backward_simples: bool = True
     min_vars_para_backward: int = 5
     n_jobs: int = N_JOBS_PADRAO
+    shadow_probing: ShadowProbingConfig = field(default_factory=ShadowProbingConfig)
 
 
 @dataclass(frozen=True)
