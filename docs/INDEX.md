@@ -17,6 +17,7 @@ Wiki de técnicas documentadas — populada pelo `literature-scout`. Ver [README
 
 ## Experimentos (`docs/experimentos/`)
 - [pedro-wise-vs-alternativas](experimentos/pedro-wise-vs-alternativas.md) — Pedro_Wise vs. LASSO vs. stability selection no mesmo dataset sintético (gabarito conhecido). Achado central: LASSO/stability selection cravaram o modelo exato; o Pedro_Wise aceitou 1 variável de ruído por otimizar KS contra um split de teste fixo.
+- [colinearidade-stability-selection](experimentos/colinearidade-stability-selection.md) — reproduz a falha do Faletto & Bien (2022) sob proxies quase-duplicadas (corr 0.919): stability selection retorna modelo vazio (AUC 0.500) numa janela estreita de regularização, enquanto LASSO/Pedro_Wise no mesmo C recuperam o sinal. Corrige hipótese: não é o `forward_duplo` que evita a falha, é não depender de consistência entre reamostragens.
 
 ## Guias (`docs/guias/`)
 - [fluxo-de-trabalho](guias/fluxo-de-trabalho.md) — como os 3 pilares e os agentes/skills se encaixam.

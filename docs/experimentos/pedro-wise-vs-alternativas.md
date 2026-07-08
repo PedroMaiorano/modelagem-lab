@@ -84,8 +84,11 @@ Frequência de seleção (stability selection, 100 reamostragens, C=0.05):
   que o mesmo C funcione tão bem noutro dataset; a escolha de regularização
   para stability selection continua sendo um ponto de atenção prático, não
   resolvido automaticamente pelo método.
-- Próximo passo natural: repetir com um dataset onde `xa`/`xb` competem de
-  verdade (ex.: LASSO só consegue escolher um dos dois por vez) para testar
-  se stability selection vs. `forward_duplo` do Pedro_Wise se comportam
-  diferente sob essa pressão — esse é o cenário que a literatura (Faletto &
-  Bien) diz ser o ponto fraco real da stability selection simples.
+- ✅ **Feito**: [`docs/experimentos/colinearidade-stability-selection.md`](colinearidade-stability-selection.md)
+  repete com `xa`/`xb` fortemente colineares (corr 0.919). A falha da
+  stability selection foi reproduzida de forma dramática (modelo vazio), mas
+  **não foi o `forward_duplo` que evitou o problema** — hipótese de entrada
+  daquele experimento corrigida no próprio documento: qualquer método com fit
+  único e determinístico (LASSO simples ou o próprio Pedro_Wise em nível 1)
+  já é imune, porque o problema é específico de consistência entre
+  reamostragens, não de testar variáveis uma a uma vs. em pares.

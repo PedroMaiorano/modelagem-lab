@@ -45,6 +45,16 @@ o Pedro_Wise vive), **embedded** (seleção durante o treino — o SOTA atual).
   plausível. Não é o mesmo problema que a semântica de "base" do Pedro_Wise resolve
   (essa agrupa *transformações da mesma variável*, não variáveis diferentes e
   correlacionadas) — mecanismos complementares.
+  **Reproduzido empiricamente no lab** (2026-07-08,
+  [`docs/experimentos/colinearidade-stability-selection.md`](../experimentos/colinearidade-stability-selection.md)):
+  sob proxies quase-duplicadas (corr 0.919), existe uma janela estreita de
+  regularização onde stability selection retorna **modelo vazio** (AUC 0.500)
+  enquanto um LASSO de fit único no mesmo `C` recupera o sinal perfeitamente.
+  Não é o `forward_duplo` do Pedro_Wise que evita isso — é qualquer método que
+  não dependa de consistência entre reamostragens (um único fit determinístico
+  já basta). Risco operacional real, não só teórico — varrer a curva de
+  frequência por `C` antes de confiar em stability selection sob variáveis
+  suspeitas de alta correlação.
 - **Shadow-variable probing**: aumenta os dados com versões permutadas ("shadow") e para
   o forward quando uma shadow entraria — seleção em um único fit, **quase sem tuning**.
   Ver síntese completa em [`docs/literatura/shadow-variable-probing.md`](../literatura/shadow-variable-probing.md).
