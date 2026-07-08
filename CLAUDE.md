@@ -12,13 +12,16 @@
 
 ```bash
 test:      pytest tests -x -v
-lint:      ruff check python/ scraping/
-typecheck: mypy python/          # código novo nasce com type hints
+lint:      ruff check python/ scraping/ scripts/
+typecheck: mypy python/pedro_wise scraping/
 r-script:  Rscript r/<arquivo>.R
-scraper:   python scraping/arxiv_client.py --query "stat.ML" --max 10
+scraper:   python scraping/arxiv_client.py --query 'cat:stat.ML AND all:"variable selection"' --max 10
+benchmark: python scripts/benchmark_paralelizacao.py
+validar:   Rscript scripts/validar_port_r.R && python scripts/validar_port_python.py
 ```
-> Os pipelines de código ainda não existem — este é um lab greenfield. Os comandos
-> acima são o contrato-alvo: todo código Python novo é type-hinted, testado e lintado.
+> Pilares 1 (port Pedro_Wise) e 2 (scraping de literatura) implementados e testados.
+> Pilar 3 (interface) segue dormente — só ativa a skill `scaffold-interface` quando pedido.
+> Todo código Python novo é type-hinted, testado e lintado.
 
 ---
 
@@ -87,10 +90,11 @@ modelagem-lab/
 │   ├── guias/                          # guias de uso
 │   ├── planos/                         # decisões de arquitetura/config
 │   └── INDEX.md                        # mapa da wiki
-├── python/                             # implementações Python (port + modelos) — VAZIO, próxima etapa
+├── python/pedro_wise/                  # port completo (níveis 1-3), métrica/estimador plugáveis
 ├── r/                                  # protótipos/originais em R
-├── scraping/                           # clients de APIs abertas — VAZIO, próxima etapa
-├── tests/                              # pytest
+├── scraping/                           # clients de APIs abertas (arXiv, S2, OpenAlex, CrossRef, Europe PMC)
+├── scripts/                            # benchmark, validação R↔Python, geração de dataset sintético
+├── tests/                              # pytest (34 testes: port + scraping)
 ├── notebooks/                          # exploração ad-hoc
 └── data/papers/                        # cache imutável de metadados (gitignored)
 ```
