@@ -47,6 +47,19 @@ o Pedro_Wise vive), **embedded** (seleção durante o treino — o SOTA atual).
   correlacionadas) — mecanismos complementares.
 - **Shadow-variable probing**: aumenta os dados com versões permutadas ("shadow") e para
   o forward quando uma shadow entraria — seleção em um único fit, **quase sem tuning**.
+  Ver síntese completa em [`docs/literatura/shadow-variable-probing.md`](../literatura/shadow-variable-probing.md).
+  Extensão relevante (Staerk & Mayr 2021): base-learners multivariáveis (atualizar
+  várias variáveis por iteração) ajudam especificamente sob alta correlação entre
+  variáveis-sinal.
+
+### Princípio transversal: seleção variável-a-variável falha sob correlação
+Três fontes independentes convergem para a mesma conclusão: stability selection
+com lasso puro (Faletto & Bien 2022), boosting component-wise clássico (Staerk &
+Mayr 2021), e — por construção, não por literatura — o `forward_duplo` do
+Pedro_Wise (que testa pares, não só variáveis isoladas). Sempre que dois ou mais
+métodos candidatos existirem, considerar essa vulnerabilidade estrutural antes de
+recomendar seleção puramente variável-a-variável em dados com clusters de
+variáveis correlacionadas.
 
 ### Bayesiano
 - **Spike-and-slab**, **horseshoe prior**: seleção via priors esparsos; quantifica

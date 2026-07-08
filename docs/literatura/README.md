@@ -21,3 +21,4 @@ pelo agente `literature-scout` (skill `buscar-literatura`).
 
 ## Tópicos cobertos
 - [stability-selection](stability-selection.md) — 2026-07-07.
+- [shadow-variable-probing](shadow-variable-probing.md) — 2026-07-07.

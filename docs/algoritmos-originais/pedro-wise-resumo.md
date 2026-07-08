@@ -83,6 +83,12 @@ modelo. Para quando nenhum nível melhora ou a `n_max_complexidade` é atingida.
 5. ✅ Nível 3 (backward complexo) com memoização e limite de profundidade — `level3.py`.
 6. ✅ Paralelização (`joblib`, backend `threading`) — medida e ativada, ver
    `docs/referencias/benchmark-paralelizacao.md` (2.9x em uso real).
+7. ⏳ **Backlog, motivado por literatura**: critério de parada via shadow-variable
+   probing (ver `docs/literatura/shadow-variable-probing.md`) como alternativa a
+   "score não melhorou mais" — ataca diretamente o caso observado na validação
+   abaixo, onde `x_ruido2_woe` (ruído puro) foi aceito por acaso amostral.
+   Não é uma `Metric` (protocolo por candidata); precisa de uma regra de parada
+   plugável a mais em `Level1Config`/`selection.py`.
 
 Ver a skill `port-r-python` e o agente `algorithm-porter` para o workflow operacional.
 
