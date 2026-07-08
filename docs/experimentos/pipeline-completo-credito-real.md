@@ -55,6 +55,31 @@ não é só exercício acadêmico.
    completos do Pedro_Wise em 15k linhas — viável para uso exploratório
    interativo (ex.: dentro do dashboard).
 
+## Adendo: `criterio="min"` testado (fechando o backlog anterior)
+
+Mesma pipeline, trocando só `KSGaussianMetric(criterio="teste")` por
+`criterio="min"` (mínimo entre KS-dev e KS-teste — pensado para penalizar
+candidatas que só melhoram num dos dois splits, ver
+`docs/experimentos/pedro-wise-vs-alternativas.md`).
+
+| Critério | Nº vars | KS-teste | AUC |
+|---|---|---|---|
+| `"teste"` | 13 | 0.4215 | 0.7639 |
+| `"min"` | 15 | 0.4196 | **0.7739** |
+
+**Hipótese não confirmada**: esperava-se que `"min"` fosse mais conservador
+e selecionasse *menos* variáveis (penalizando ruído específico do split de
+teste). Na prática, selecionou **mais** (15 vs. 13) — incluindo uma segunda
+variável construída (`proppaga2_woe`) — com KS praticamente igual e AUC
+*melhor*. Duas leituras possíveis, nenhuma confirmada aqui: (a) o critério
+`"min"` navega para um ótimo local diferente, não necessariamente mais
+simples; (b) o dataset real tem sinal robusto o bastante que ambos os
+critérios convergem para soluções de qualidade parecida, só com conjuntos
+de variáveis diferentes. Vale registrar como resultado honesto, não como
+confirmação da hipótese original — a recomendação de usar `"min"` para
+reduzir risco de ruído continua válida (fundamentada no achado da validação
+R↔Python), mas não por reduzir complexidade do modelo.
+
 ## Limitações
 
 - `bins_monotonicos` é a versão gulosa/pragmática, não a ótima via MIP
