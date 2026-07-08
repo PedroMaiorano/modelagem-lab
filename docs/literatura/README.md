@@ -19,6 +19,15 @@ pelo agente `literature-scout` (skill `buscar-literatura`).
 ## Conexão com o acervo (Pedro_Wise / seleção de variáveis / outro)
 ```
 
+## Organização por módulo
+
+O lab tem 4 módulos de modelagem (ver `docs/guias/fluxo-de-trabalho.md`):
+categorização, transformação, construção, treinamento. A literatura segue
+essa mesma divisão — ao adicionar um tópico novo, identifique de qual
+módulo ele é antes de criar o arquivo.
+
 ## Tópicos cobertos
-- [stability-selection](stability-selection.md) — 2026-07-07.
-- [shadow-variable-probing](shadow-variable-probing.md) — 2026-07-07.
+- **Categorização**: [categorizacao](categorizacao.md) — 2026-07-08 (13 refs).
+- **Transformação**: [transformacao](transformacao.md) — 2026-07-08 (11 refs).
+- **Construção**: [construcao-variaveis](construcao-variaveis.md) — 2026-07-08 (12 refs).
+- **Treinamento**: [stability-selection](stability-selection.md) — 2026-07-07 (5 refs); [shadow-variable-probing](shadow-variable-probing.md) — 2026-07-07 (3 refs).
