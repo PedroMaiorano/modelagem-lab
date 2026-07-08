@@ -1,10 +1,12 @@
 # CLAUDE.md — modelagem-lab
 
 > Laboratório pessoal de ciência de dados: modelagem estatística e ML em Python e R,
-> técnicas clássicas e SOTA, com foco em **seleção de variáveis, construção de modelos
-> e análises**. Agnóstico de domínio; risco de crédito é um caso de uso suportado,
-> não o único. Três pilares: (1) port+melhoria do algoritmo Pedro_Wise (R→Python),
-> (2) scraping de literatura acadêmica aberta, (3) interface (dashboard Streamlit em `app/`).
+> técnicas clássicas e SOTA. Agnóstico de domínio; risco de crédito é um caso de uso
+> suportado, não o único. **4 módulos de modelagem** (cada um um pacote Python
+> separado, compostos num pipeline — ver §7): **categorização** (binning),
+> **transformação** (WOE/encodings), **construção** (feature engineering),
+> **treinamento** (seleção de variáveis/modelos — o Pedro_Wise). Mais 2 pilares de
+> suporte: scraping de literatura acadêmica aberta, e interface (dashboard em `app/`).
 
 ---
 
@@ -12,16 +14,21 @@
 
 ```bash
 test:      pytest tests -x -v
-lint:      ruff check python/ scraping/ scripts/
-typecheck: mypy python/pedro_wise scraping/
+lint:      ruff check python/ scraping/ scripts/ app/
+typecheck: mypy python/pedro_wise python/categorizacao python/transformacao python/construcao scraping/
 r-script:  Rscript r/<arquivo>.R
 scraper:   python scraping/arxiv_client.py --query 'cat:stat.ML AND all:"variable selection"' --max 10
 benchmark: python scripts/benchmark_paralelizacao.py
 validar:   Rscript scripts/validar_port_r.R && python scripts/validar_port_python.py
+pipeline:  python scripts/pipeline_completo_credito_real.py   # construção->categorização->WOE->treinamento
 app:       python -m streamlit run app/streamlit_app.py   # ver nota Windows em docs/planos/interface-streamlit.md
 ```
-> Pilares 1 (port Pedro_Wise), 2 (scraping de literatura) e 3 (interface, v1) implementados e testados.
+> Os 4 módulos de modelagem (categorização, transformação, construção, treinamento),
+> scraping de literatura e interface (v1) estão implementados e testados (63 testes).
 > Todo código Python novo é type-hinted, testado e lintado.
+> **Próximo pedido pendente do usuário** (explicitamente adiado até os módulos
+> estarem prontos): interface mais fluida/responsiva/bonita que o Streamlit v1
+> atual — ver `docs/planos/expansao-modulos-2026-07-08.md` antes de iniciar.
 
 ---
 
@@ -57,8 +64,8 @@ app:       python -m streamlit run app/streamlit_app.py   # ver nota Windows em 
 |----------|------|-------------|
 | `algorithm-porter` | agent | Port R→Python **com melhoria algorítmica** — o caso central é o Pedro_Wise. Carrega o contexto do algoritmo original. |
 | `literature-scout` | agent | Busca + síntese de literatura em fontes abertas; alimenta a wiki `docs/literatura/`. |
-| `model-builder` | agent | Construir/treinar modelos e pipelines de seleção de variáveis; validação e avaliação. |
-| `stats-advisor` | agent | Aconselha metodologia: qual técnica de seleção/modelagem usar, clássica vs. SOTA, pressupostos. Decide o QUÊ; `model-builder` faz o COMO. |
+| `model-builder` | agent | Construir/treinar modelos e pipelines — hoje cobre os 4 módulos (`categorizacao`, `transformacao`, `construcao`, `pedro_wise`), não só seleção. Validação e avaliação. |
+| `stats-advisor` | agent | Aconselha metodologia em qualquer um dos 4 módulos: qual técnica usar, clássica vs. SOTA, pressupostos. Decide o QUÊ; `model-builder` faz o COMO. |
 | `port-r-python` | skill | Workflow passo-a-passo de port R→Python (usa `algorithm-porter`). |
 | `buscar-literatura` | skill | Workflow de busca acadêmica com comandos concretos por API. |
 | `selecao-variaveis` | skill | Workflow de seleção de variáveis (forward/backward/stepwise, regularização, boosting, stability selection). |
@@ -91,12 +98,16 @@ modelagem-lab/
 │   ├── guias/                          # guias de uso
 │   ├── planos/                         # decisões de arquitetura/config
 │   └── INDEX.md                        # mapa da wiki
-├── python/pedro_wise/                  # port completo (níveis 1-3), métrica/estimador plugáveis
-├── app/                                # dashboard Streamlit (pilar 3) — consome python/pedro_wise
+├── python/
+│   ├── pedro_wise/                     # módulo TREINAMENTO — port completo (níveis 1-3), métrica/estimador plugáveis
+│   ├── categorizacao/                  # módulo CATEGORIZAÇÃO — binning (largura/frequência/árvore/monotônico)
+│   ├── transformacao/                  # módulo TRANSFORMAÇÃO — WOE/IV (fit/transform anti-leakage)
+│   └── construcao/                     # módulo CONSTRUÇÃO — razões/diferenças (escopo v1 mínimo, deliberado)
+├── app/                                # dashboard Streamlit (pilar interface) — consome python/*, não reimplementa
 ├── r/                                  # protótipos/originais em R
 ├── scraping/                           # clients de APIs abertas (arXiv, S2, OpenAlex, CrossRef, Europe PMC)
-├── scripts/                            # benchmark, validação R↔Python, experimentos, geração de datasets
-├── tests/                              # pytest (40 testes: port + scraping)
+├── scripts/                            # benchmark, validação R↔Python, experimentos, geração de datasets, pipeline completo
+├── tests/                              # pytest (63 testes: 4 módulos + scraping)
 ├── notebooks/                          # exploração ad-hoc
 └── data/papers/                        # cache imutável de metadados (gitignored)
 ```
@@ -105,9 +116,61 @@ modelagem-lab/
 
 ## 7. Contexto de Domínio
 
-- **Pedro_Wise é a peça central do pilar 1.** É uma busca greedy multi-nível para GLM binomial que otimiza KS. O port Python deve preservar a *lógica de seleção* mas corrigir os anti-padrões e generalizar métrica/família. Leia `docs/algoritmos-originais/pedro-wise-resumo.md` antes de portar — não decifre o `.R` do zero.
-- **Variáveis têm sufixo de transformação** (`_woe`, `_log`, ...). A "base" é o prefixo antes do último `_`. A seleção nunca coloca duas versões da mesma base no modelo ao mesmo tempo; "transformação simples" troca uma versão por outra da mesma base. Preserve essa semântica no port.
-- **KS via score Gaussiano**: o R transforma probabilidade → `xbeta` → score 0-1000 truncado por faixas de percentil, depois roda `ks.test` entre score de y=1 e y=0. No port, isso é *uma* implementação da interface de métrica plugável, não a métrica única.
-- **SOTA importa aqui.** A seleção stepwise clássica do Pedro_Wise deve conviver com alternativas modernas (LASSO/elastic net, component-wise boosting, stability selection, shadow-variable probing, AutoML). O `stats-advisor` conhece essas conexões; ver o SOTA tracker.
-- **Fontes de literatura só abertas.** arXiv (XML, sem chave), Semantic Scholar (100 req/5min sem chave), OpenAlex e CrossRef (sem chave, polite pool via `mailto`), PubMed E-utilities (3 req/s sem chave). Detalhes operacionais em `docs/referencias/apis-fontes-abertas.md`.
-- **Última verificação SOTA**: 2026-07-07. Reveja com `buscar-literatura` quando encostar em técnica não listada no tracker.
+### Os 4 módulos de modelagem — como compõem
+
+```
+construcao/  ──►  categorizacao/  ──►  transformacao/  ──►  pedro_wise/
+(features novas)   (bins por var.)     (WOE por bin)        (seleção final)
+```
+
+Ver `scripts/pipeline_completo_credito_real.py` para a composição completa
+rodando de ponta a ponta, e `docs/experimentos/pipeline-completo-credito-real.md`
+para o resultado (pipeline completo bate o baseline cru: KS 0.42 vs. 0.40).
+Cada módulo é standalone (testável isolado) mas desenhado para essa costura.
+
+- **`categorizacao/`** (binning): `bins_largura_igual`/`bins_frequencia_igual`
+  (baseline não-supervisionado), `bins_arvore` (supervisionado via árvore
+  rasa), `bins_monotonicos` (merge guloso até taxa de evento monotônica —
+  aproximação pragmática do OptBinning/MIP, documentada como tal, não a
+  solução ótima). Ver `docs/literatura/categorizacao.md`.
+- **`transformacao/`** (WOE/IV): fecha a lacuna histórica do lab — `_woe` era
+  só convenção de nome até isso existir. Convenção de sinal: WOE positivo =
+  mais não-evento (Siddiqi). `ajustar_woe`/`aplicar_woe` seguem fit/transform
+  (anti-leakage: tabela ajustada só no dev). `classificar_iv` dá a régua de
+  interpretação prática (>0.5 = suspeito de vazamento — já pegou um caso real
+  no `credito_real`, `PAY0` IV=0.83). Ver `docs/literatura/transformacao.md`.
+- **`construcao/`** (feature engineering): escopo v1 **deliberadamente
+  mínimo** — razões/diferenças interpretáveis, não busca automática
+  (GP/RL/Deep Feature Synthesis). Motivo documentado em
+  `docs/literatura/construcao-variaveis.md` — é o módulo menos maduro na
+  literatura (duas escolas divergentes), maior risco de over-engineering.
+- **`pedro_wise/`** (treinamento/seleção — pilar histórico do lab): busca
+  greedy multi-nível para GLM binomial que otimiza KS. Preserva a *lógica de
+  seleção* do R original mas corrige anti-padrões e generaliza métrica/família
+  (protocolos plugáveis). Leia `docs/algoritmos-originais/pedro-wise-resumo.md`
+  antes de portar mais — não decifre o `.R` do zero.
+
+### Semântica e convenções que atravessam os módulos
+
+- **Variáveis têm sufixo de transformação** (`_woe`, `_log`, ...). A "base" é
+  o prefixo antes do último `_` (`pedro_wise.base.extrair_base`). A seleção
+  nunca coloca duas versões da mesma base no modelo ao mesmo tempo.
+  **Datasets reais fora dessa convenção precisam de prep** — ver
+  `docs/referencias/datasets.md` (`credito_real`: colunas UCI como `PAY_0`
+  tiveram os underscores removidos antes de entrar no Pedro_Wise, senão
+  colidiam de base com `PAY_AMT1`).
+- **KS via score Gaussiano**: o R transforma probabilidade → `xbeta` → score
+  0-1000 truncado por faixas de percentil, depois roda `ks.test`. No port,
+  isso é *uma* implementação da interface de métrica plugável, não a única.
+- **SOTA importa aqui.** Cada módulo deve conviver com alternativas modernas
+  (LASSO/elastic net, component-wise boosting, stability selection,
+  shadow-variable probing, AutoML, OptBinning, target encoding regularizado).
+  O `stats-advisor` conhece essas conexões; ver o SOTA tracker e
+  `docs/literatura/` (organizada pelos mesmos 4 módulos).
+- **Fontes de literatura só abertas.** arXiv (XML, sem chave), Semantic
+  Scholar (100 req/5min sem chave — bate rate limit fácil, já aconteceu),
+  OpenAlex e CrossRef (sem chave, polite pool via `mailto`), PubMed
+  E-utilities (3 req/s sem chave). Detalhes em `docs/referencias/apis-fontes-abertas.md`.
+- **Última verificação SOTA**: 2026-07-08 (ampliação grande — ver
+  `docs/planos/expansao-modulos-2026-07-08.md`). Reveja com `buscar-literatura`
+  quando encostar em técnica não listada no tracker.
