@@ -17,18 +17,63 @@ NiceGUI/Reflex e "melhorar o Streamlit atual").
 
 ```
 app/backend/          FastAPI — expõe os 4 módulos via API + streaming SSE
-├── main.py             endpoints (/api/datasets, /api/pipeline/run)
-└── logica.py           orquestra construção→categorização→WOE→Pedro_Wise
+├── main.py             endpoints (/api/datasets, /api/dataset/upload,
+│                        /api/dataset/preparar, /api/modulo/*, /api/pipeline/run)
+├── ingestao.py          detecção de coluna/data + os 3 modos de split
+└── logica.py            orquestra construção→categorização→WOE→Pedro_Wise
+                          (módulos expostos separados E compostos)
 
 app/frontend/          Next.js 16 (App Router) + TypeScript + Tailwind v4
 └── app/
     ├── page.tsx                  página única, orquestra estado
     ├── lib/api.ts                 tipos + cliente HTTP/SSE
     └── components/
-        ├── PainelConfig.tsx       sidebar: dataset, critério, flags
+        ├── PainelUpload.tsx       upload CSV → detecção → split → preparar
+        ├── PainelConfig.tsx       sidebar: dataset, critério, flags (níveis 1-3)
+        ├── PainelModulos.tsx      construção / categorização+transformação isolados
         ├── ProgressoAoVivo.tsx    log ao vivo (auto-scroll)
         └── PainelResultado.tsx    métricas, variáveis, barras de IV
 ```
+
+## Fases 1-4 (2026-07-09, pós-feedback do usuário)
+
+Depois do primeiro teste visual da v2, o usuário pediu (verbatim, resumido):
+upload de CSV com perguntas sobre como o backend reconhece tipo de coluna/
+resposta/split; sentiu falta do nível 3 e de flags granulares que existiam
+na v1; achou o botão do pipeline feio; perguntou se dava pra fazer por
+módulos. Aprovou fazer as 4 fases em sequência.
+
+1. **Upload + split** (`ingestao.py`, `/api/dataset/upload`,
+   `/api/dataset/preparar`): detecção de tipo por coluna (numérico/data/
+   categórico), com heurística de comprimento modal de string pra formato
+   de data (evita falso positivo tipo idade~"%Y%m"). Três modos de split:
+   coluna de amostra já existente na base, out-of-time por data (com
+   sugestão automática de corte), aleatório com semente. Depois de
+   "preparado" vira `data/<nome>/{dev,teste}.csv` — mesmo formato que todo
+   o resto do backend já consome.
+2. **Nível 3 + flags granulares**: `rodar_pipeline` ganhou parâmetros pra
+   cada flag de nível 1 (forward/transformação/backward simples,
+   min_vars_para_backward) e nível 2 (forward duplo/triplo, transformação/
+   backward simples) que existiam na v1 Streamlit mas foram perdidas no
+   port; nível 3 (backward complexo recursivo, `run_pedro_wise_completo`)
+   nunca tinha sido exposto na v2 antes.
+3. **Módulos isolados**: `_construir_e_transformar` foi quebrada em
+   `_construir` + `_categorizar_e_transformar`; novos endpoints
+   `/api/modulo/construcao` e `/api/modulo/categorizacao-transformacao`
+   rodam cada etapa isolada (sem persistir cache — recomputam do zero a
+   cada chamada, evita risco de cache desatualizado). `PainelModulos.tsx`
+   mostra as 2 etapas como seções expansíveis com resultado (colunas
+   construídas / ranking de IV) antes do treinamento.
+4. **Polish visual**: botão "Rodar seleção" ganhou gradiente + sombra +
+   spinner de loading (era um botão chapado — a reclamação específica do
+   usuário). Header ganhou separador e indicador de status do backend.
+
+Testado ponta a ponta contra o backend real em cada fase (curl + scripts
+`node` replicando o fluxo exato do frontend) — achou e corrigiu um bug
+real: coluna categórica (texto) quebrava `bins_monotonicos` porque a
+categorização era aplicada incondicionalmente a toda coluna candidata;
+corrigido ramificando por `pd.api.types.is_numeric_dtype` (categóricas
+pulam o binning, cada categoria já é o próprio "bin" pro WOE).
 
 ## Como o progresso em tempo real funciona (sem tocar o core)
 
@@ -105,12 +150,20 @@ funcionais e testados (`docs/planos/interface-streamlit.md`). Não há
 decisão do usuário para descartar; as duas convivem até haver instrução
 explícita de remover uma.
 
-## Escopo não coberto nesta v1 do v2 (backlog)
+## Escopo não coberto (backlog)
 
-- Sem upload de CSV arbitrário (só datasets já gerados em `data/`, igual à v1).
 - Gráfico de progresso do KS ao longo da busca (a v1 Streamlit tinha via
   `st.line_chart`) — não portado ainda, só o log de texto ao vivo.
 - Sem testes automatizados de frontend (Playwright/Vitest) — só as
-  verificações manuais acima. Se a interface crescer, vale considerar.
+  verificações manuais/via `node`. Se a interface crescer, vale considerar.
 - Tema único escuro, sem alternância clara/escura (decisão deliberada de
   escopo para uma ferramenta interna de um usuário só).
+- Módulos isolados (Fase 3) não persistem estado entre si — rodar
+  "categorização+transformação" recomputa a construção internamente se
+  `usar_construcao=true`, não reaproveita o resultado já mostrado da etapa
+  1. Simplicidade deliberada (evita cache desatualizado); se o dataset
+  crescer muito, considerar persistir intermediários em disco.
+- Sem verificação visual num navegador real neste ambiente (sem ferramenta
+  de screenshot) — todas as fases testadas via `curl`/`node`/build/lint,
+  não com olhos humanos. Próximo passo se o usuário reportar algo quebrado
+  visualmente.
