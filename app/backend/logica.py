@@ -26,9 +26,16 @@ import pandas as pd  # noqa: E402
 from categorizacao import aplicar_bins, bins_monotonicos  # noqa: E402
 from construcao import construir_razoes_em_lote  # noqa: E402
 from pedro_wise.estimators import LogisticGLM  # noqa: E402
+from pedro_wise.level3 import run_pedro_wise_completo  # noqa: E402
 from pedro_wise.metrics import KSGaussianMetric  # noqa: E402
 from pedro_wise.pipeline import run_pedro_wise  # noqa: E402
-from pedro_wise.types import Level1Config, Level2Config, SelectionState, ShadowProbingConfig  # noqa: E402
+from pedro_wise.types import (  # noqa: E402
+    Level1Config,
+    Level2Config,
+    Level3Config,
+    SelectionState,
+    ShadowProbingConfig,
+)
 from sklearn.metrics import roc_auc_score  # noqa: E402
 from transformacao import ajustar_woe, aplicar_woe, classificar_iv  # noqa: E402
 
@@ -104,11 +111,20 @@ def _construir_e_transformar(
 
     for coluna in colunas_candidatas:
         try:
-            resultado_bin = bins_monotonicos(df_dev[coluna], df_dev["y"], n_bins_inicial=15)
-            if len(resultado_bin.edges) < 3:
-                continue
-            bin_dev = aplicar_bins(df_dev[coluna], resultado_bin.edges)
-            bin_teste = aplicar_bins(df_teste[coluna], resultado_bin.edges)
+            if pd.api.types.is_numeric_dtype(df_dev[coluna]):
+                # Numérica: categoriza (binning monotônico) antes do WOE.
+                resultado_bin = bins_monotonicos(df_dev[coluna], df_dev["y"], n_bins_inicial=15)
+                if len(resultado_bin.edges) < 3:
+                    continue
+                bin_dev = aplicar_bins(df_dev[coluna], resultado_bin.edges)
+                bin_teste = aplicar_bins(df_teste[coluna], resultado_bin.edges)
+            else:
+                # Categórica (texto/data-como-string): sem binning — cada
+                # categoria já É o "bin", prática padrão de WOE categórico
+                # (ver docs/literatura/categorizacao.md: binning existe pra
+                # discretizar CONTÍNUAS, não se aplica aqui).
+                bin_dev = df_dev[coluna]
+                bin_teste = df_teste[coluna]
 
             tabela = ajustar_woe(bin_dev, df_dev["y"])
             # datasets sintéticos do lab já nomeiam a variável crua com sufixo
@@ -121,7 +137,7 @@ def _construir_e_transformar(
             classificacao = classificar_iv(tabela.iv_total)
             mensagem = f"  {coluna}: IV={tabela.iv_total:.4f} ({classificacao})"
             fila.put({"tipo": "log", "mensagem": mensagem})
-        except (ValueError, IndexError) as e:
+        except (ValueError, IndexError, TypeError) as e:
             fila.put({"tipo": "log", "mensagem": f"  [pulado] {coluna}: {e}"})
 
     return pd.DataFrame(woe_dev), pd.DataFrame(woe_teste), iv_por_variavel
@@ -133,15 +149,30 @@ def rodar_pipeline(
     usar_pipeline_completo: bool = True,
     criterio: str = "teste",
     shadow_probing: bool = False,
+    # Nível 1 — flags individuais (regressão da v2 vs. a v1 Streamlit, restaurada).
+    forward_simples: bool = True,
+    transformacao_simples_nivel1: bool = True,
+    backward_simples_nivel1: bool = True,
+    min_vars_para_backward: int = 5,
+    # Nível 2 / 2.5
+    forward_duplo: bool = True,
+    forward_triplo: bool = True,
+    transformacao_simples_nivel2: bool = True,
+    backward_simples_nivel2: bool = True,
     n_best_duplo: int = 5,
     n_best_triplo_1: int = 3,
     n_best_triplo_2: int = 3,
+    # Nível 3 — nunca exposto antes na v2; existia no core mas não na API/UI.
+    nivel3_ativado: bool = False,
+    n_best_backward: int = 2,
+    profundidade_maxima_nivel3: int = 2,
     fila: queue.Queue[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Roda o pipeline (opcionalmente construção+categorização+WOE) seguido
-    de `run_pedro_wise`, publicando progresso em `fila` em tempo real via
-    `CapturadorProgresso`. Retorna o resultado final (também colocado na
-    fila como último item, tipo "resultado", pelo chamador).
+    do Pedro_Wise (níveis 1-2.5, ou 1-3 se `nivel3_ativado`), publicando
+    progresso em `fila` em tempo real via `CapturadorProgresso`. Retorna o
+    resultado final (também colocado na fila como último item, tipo
+    "resultado", pelo chamador).
     """
     fila = fila if fila is not None else queue.Queue()
     t0 = time.perf_counter()
@@ -154,7 +185,8 @@ def rodar_pipeline(
     else:
         fila.put({"tipo": "etapa", "mensagem": "Rodando direto nas variáveis originais (sem pipeline)"})
 
-    fila.put({"tipo": "etapa", "mensagem": "Treinamento: Pedro_Wise"})
+    sufixo_nivel3 = " (com nível 3)" if nivel3_ativado else ""
+    fila.put({"tipo": "etapa", "mensagem": f"Treinamento: Pedro_Wise{sufixo_nivel3}"})
 
     logger_pedro_wise = logging.getLogger("pedro_wise")
     handler = CapturadorProgresso(fila)
@@ -168,13 +200,33 @@ def rodar_pipeline(
         score_nulo = metric(modelo_nulo, df_dev[[]], df_dev["y"], df_teste[[]], df_teste["y"])
         estado_inicial = SelectionState(variables=(), model=modelo_nulo, score=score_nulo)
 
-        config1 = Level1Config(shadow_probing=ShadowProbingConfig(ativado=shadow_probing, semente=7))
+        config1 = Level1Config(
+            forward_simples=forward_simples,
+            transformacao_simples=transformacao_simples_nivel1,
+            backward_simples=backward_simples_nivel1,
+            min_vars_para_backward=min_vars_para_backward,
+            shadow_probing=ShadowProbingConfig(ativado=shadow_probing, semente=7),
+        )
         config2 = Level2Config(
-            n_best_duplo=n_best_duplo, n_best_triplo_1=n_best_triplo_1, n_best_triplo_2=n_best_triplo_2
+            forward_duplo=forward_duplo,
+            forward_triplo=forward_triplo,
+            transformacao_simples=transformacao_simples_nivel2,
+            backward_simples=backward_simples_nivel2,
+            n_best_duplo=n_best_duplo,
+            n_best_triplo_1=n_best_triplo_1,
+            n_best_triplo_2=n_best_triplo_2,
         )
-        estado_final, trace = run_pedro_wise(
-            estimator, metric, df_dev, df_teste, estado_inicial, config1, config2
-        )
+        if nivel3_ativado:
+            config3 = Level3Config(
+                ativado=True, n_best_backward=n_best_backward, profundidade_maxima=profundidade_maxima_nivel3
+            )
+            estado_final, trace = run_pedro_wise_completo(
+                estimator, metric, df_dev, df_teste, estado_inicial, config1, config2, config3
+            )
+        else:
+            estado_final, trace = run_pedro_wise(
+                estimator, metric, df_dev, df_teste, estado_inicial, config1, config2
+            )
     finally:
         logger_pedro_wise.removeHandler(handler)
         logger_pedro_wise.setLevel(nivel_anterior)

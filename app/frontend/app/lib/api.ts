@@ -7,9 +7,107 @@ export interface ConfigPipeline {
   usar_pipeline_completo: boolean;
   criterio: "teste" | "dev" | "min";
   shadow_probing: boolean;
+  // Nível 1
+  forward_simples: boolean;
+  transformacao_simples_nivel1: boolean;
+  backward_simples_nivel1: boolean;
+  min_vars_para_backward: number;
+  // Nível 2 / 2.5
+  forward_duplo: boolean;
+  forward_triplo: boolean;
+  transformacao_simples_nivel2: boolean;
+  backward_simples_nivel2: boolean;
   n_best_duplo: number;
   n_best_triplo_1: number;
   n_best_triplo_2: number;
+  // Nível 3
+  nivel3_ativado: boolean;
+  n_best_backward: number;
+  profundidade_maxima_nivel3: number;
+}
+
+// ---------------------------------------------------------------------------
+// Ingestão: upload de CSV, detecção de colunas, split. Ver app/backend/ingestao.py.
+// ---------------------------------------------------------------------------
+
+export interface ColunaDetectada {
+  nome: string;
+  tipo: "numerico" | "data" | "categorico";
+  formato_data: string | null;
+  n_distintos: number;
+  exemplos: string[];
+}
+
+export interface RespostaUpload {
+  upload_id: string;
+  n_linhas: number;
+  colunas: ColunaDetectada[];
+}
+
+export interface ValorDistinto {
+  valor: string;
+  contagem: number;
+}
+
+export type ConfigSplit =
+  | { modo: "amostra"; coluna: string; valores_dev: string[]; valores_teste: string[] }
+  | { modo: "oot"; coluna: string; formato: string; corte: string }
+  | { modo: "aleatorio"; proporcao_teste: number; semente: number };
+
+export interface ConfigPreparar {
+  upload_id: string;
+  nome_dataset: string;
+  coluna_resposta: string;
+  split: ConfigSplit;
+}
+
+export async function uploadDataset(arquivo: File): Promise<RespostaUpload> {
+  const form = new FormData();
+  form.append("arquivo", arquivo);
+  const resp = await fetch(`${URL_API}/api/dataset/upload`, { method: "POST", body: form });
+  if (!resp.ok) throw new Error(`Falha ao enviar arquivo (${resp.status})`);
+  return resp.json();
+}
+
+export async function buscarValoresDistintos(uploadId: string, coluna: string): Promise<ValorDistinto[]> {
+  const resp = await fetch(
+    `${URL_API}/api/dataset/${uploadId}/coluna/${encodeURIComponent(coluna)}/valores`,
+  );
+  if (!resp.ok) throw new Error(`Falha ao buscar valores de '${coluna}' (${resp.status})`);
+  return resp.json();
+}
+
+export async function sugerirCorte(
+  uploadId: string,
+  coluna: string,
+  formato: string,
+  proporcaoTeste: number,
+): Promise<string> {
+  const params = new URLSearchParams({
+    upload_id: uploadId,
+    coluna,
+    formato,
+    proporcao_teste: String(proporcaoTeste),
+  });
+  const resp = await fetch(`${URL_API}/api/dataset/sugerir-corte?${params}`);
+  if (!resp.ok) throw new Error(`Falha ao sugerir corte (${resp.status})`);
+  const dados = await resp.json();
+  return dados.corte;
+}
+
+export async function prepararDataset(
+  config: ConfigPreparar,
+): Promise<{ nome_dataset: string; n_dev: number; n_teste: number }> {
+  const resp = await fetch(`${URL_API}/api/dataset/preparar`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!resp.ok) {
+    const detalhe = await resp.json().catch(() => null);
+    throw new Error(detalhe?.detail ?? `Falha ao preparar dataset (${resp.status})`);
+  }
+  return resp.json();
 }
 
 export interface EventoEtapa {
