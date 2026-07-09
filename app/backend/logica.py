@@ -85,23 +85,32 @@ def preview_dataset(nome: str, n: int = 5) -> dict[str, Any]:
     }
 
 
-def _construir_e_transformar(
+def _construir(
     df_dev: pd.DataFrame, df_teste: pd.DataFrame, fila: queue.Queue[dict[str, Any]]
-) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
-    """Construção (razões, se aplicável) + categorização (bins monotônicos)
-    + transformação (WOE) — mesma lógica de `scripts/pipeline_completo_credito_real.py`,
-    reescrita aqui para publicar progresso na fila a cada variável processada.
+) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    """Construção (razões de negócio, quando as colunas necessárias existem no
+    dataset). Módulo isolado — ver `python/construcao/`.
     """
     pares_aplicaveis = [
         (num, den, nome)
         for num, den, nome in PARES_RAZAO_CREDITO_REAL
         if num in df_dev.columns and den in df_dev.columns
     ]
-    if pares_aplicaveis:
-        fila.put({"tipo": "etapa", "mensagem": f"Construção: {len(pares_aplicaveis)} razões novas"})
-        df_dev = pd.concat([df_dev, construir_razoes_em_lote(df_dev, pares_aplicaveis)], axis=1)
-        df_teste = pd.concat([df_teste, construir_razoes_em_lote(df_teste, pares_aplicaveis)], axis=1)
+    if not pares_aplicaveis:
+        return df_dev, df_teste, []
 
+    fila.put({"tipo": "etapa", "mensagem": f"Construção: {len(pares_aplicaveis)} razões novas"})
+    df_dev = pd.concat([df_dev, construir_razoes_em_lote(df_dev, pares_aplicaveis)], axis=1)
+    df_teste = pd.concat([df_teste, construir_razoes_em_lote(df_teste, pares_aplicaveis)], axis=1)
+    return df_dev, df_teste, [nome for _, _, nome in pares_aplicaveis]
+
+
+def _categorizar_e_transformar(
+    df_dev: pd.DataFrame, df_teste: pd.DataFrame, fila: queue.Queue[dict[str, Any]]
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
+    """Categorização (bins monotônicos) + transformação (WOE) — módulos
+    isolados, ver `python/categorizacao/` e `python/transformacao/`.
+    """
     colunas_candidatas = [c for c in df_dev.columns if c != "y"]
     fila.put({"tipo": "etapa", "mensagem": f"Categorização + WOE: {len(colunas_candidatas)} candidatas"})
 
@@ -141,6 +150,51 @@ def _construir_e_transformar(
             fila.put({"tipo": "log", "mensagem": f"  [pulado] {coluna}: {e}"})
 
     return pd.DataFrame(woe_dev), pd.DataFrame(woe_teste), iv_por_variavel
+
+
+def _construir_e_transformar(
+    df_dev: pd.DataFrame, df_teste: pd.DataFrame, fila: queue.Queue[dict[str, Any]]
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
+    """Composição construção → categorização → transformação, usada pelo
+    pipeline "rodar tudo de uma vez" (`rodar_pipeline`). Os módulos também
+    são expostos separadamente para inspeção (`rodar_construcao`,
+    `rodar_categorizacao_transformacao`), sem persistir nada em disco — cada
+    chamada de `/api/pipeline/run` recomputa do zero a partir de `dev.csv`/
+    `teste.csv`, então não há cache para ficar desatualizado.
+    """
+    df_dev, df_teste, _ = _construir(df_dev, df_teste, fila)
+    return _categorizar_e_transformar(df_dev, df_teste, fila)
+
+
+def rodar_construcao(dataset: str) -> dict[str, Any]:
+    """Roda só o módulo de construção, pra inspeção isolada (Fase 3 — UI
+    modular). Não persiste nada; se não houver razões aplicáveis ao
+    dataset, `colunas_novas` vem vazio.
+    """
+    df_dev, df_teste = carregar_dataset(dataset)
+    fila: queue.Queue[dict[str, Any]] = queue.Queue()
+    df_dev, _, colunas_novas = _construir(df_dev, df_teste, fila)
+    return {
+        "colunas_novas": colunas_novas,
+        "n_colunas_total": len([c for c in df_dev.columns if c != "y"]),
+        "amostra": df_dev.head(5).to_dict(orient="records"),
+    }
+
+
+def rodar_categorizacao_transformacao(dataset: str, usar_construcao: bool = True) -> dict[str, Any]:
+    """Roda construção (opcional) + categorização + transformação, pra
+    inspeção isolada (Fase 3 — UI modular). Não persiste nada.
+    """
+    df_dev, df_teste = carregar_dataset(dataset)
+    fila: queue.Queue[dict[str, Any]] = queue.Queue()
+    if usar_construcao:
+        df_dev, df_teste, _ = _construir(df_dev, df_teste, fila)
+    _, _, iv_por_variavel = _categorizar_e_transformar(df_dev, df_teste, fila)
+    iv_ordenado = sorted(iv_por_variavel.items(), key=lambda kv: kv[1], reverse=True)
+    return {
+        "n_variaveis": len(iv_por_variavel),
+        "iv": [{"variavel": v, "iv": iv, "classificacao": classificar_iv(iv)} for v, iv in iv_ordenado],
+    }
 
 
 def rodar_pipeline(

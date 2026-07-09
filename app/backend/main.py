@@ -29,7 +29,13 @@ from ingestao import (
     salvar_staging,
     valores_distintos,
 )
-from logica import listar_datasets, preview_dataset, rodar_pipeline
+from logica import (
+    listar_datasets,
+    preview_dataset,
+    rodar_categorizacao_transformacao,
+    rodar_construcao,
+    rodar_pipeline,
+)
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -54,6 +60,29 @@ def rota_preview_dataset(nome: str) -> dict[str, Any]:
     if nome not in listar_datasets():
         raise HTTPException(status_code=404, detail=f"Dataset '{nome}' não encontrado")
     return preview_dataset(nome)
+
+
+# ---------------------------------------------------------------------------
+# Módulos isolados (Fase 3): construção e categorização+transformação podem
+# ser rodados e inspecionados separadamente do treinamento, sem persistir
+# nada em disco — cada chamada recomputa a partir de dev.csv/teste.csv.
+# O treinamento continua em /api/pipeline/run (já é "opcional usar
+# construção+categorização+WOE" via usar_pipeline_completo).
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/modulo/construcao")
+def rota_rodar_construcao(dataset: str) -> dict[str, Any]:
+    if dataset not in listar_datasets():
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' não encontrado")
+    return rodar_construcao(dataset)
+
+
+@app.post("/api/modulo/categorizacao-transformacao")
+def rota_rodar_categorizacao_transformacao(dataset: str, usar_construcao: bool = True) -> dict[str, Any]:
+    if dataset not in listar_datasets():
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' não encontrado")
+    return rodar_categorizacao_transformacao(dataset, usar_construcao=usar_construcao)
 
 
 # ---------------------------------------------------------------------------

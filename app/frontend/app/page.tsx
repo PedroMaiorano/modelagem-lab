@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import PainelConfig from "./components/PainelConfig";
+import PainelModulos from "./components/PainelModulos";
 import PainelUpload from "./components/PainelUpload";
 import ProgressoAoVivo, { type LinhaProgresso } from "./components/ProgressoAoVivo";
 import PainelResultado from "./components/PainelResultado";
@@ -111,6 +112,7 @@ export default function Pagina() {
         </header>
 
         <div className="flex flex-col gap-6">
+          {config.dataset && <PainelModulos dataset={config.dataset} />}
           <ProgressoAoVivo linhas={linhas} rodando={rodando} />
           {resultado && <PainelResultado resultado={resultado} />}
         </div>

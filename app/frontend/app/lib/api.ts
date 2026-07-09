@@ -95,6 +95,47 @@ export async function sugerirCorte(
   return dados.corte;
 }
 
+// ---------------------------------------------------------------------------
+// Módulos isolados (Fase 3): construção e categorização+transformação
+// rodam e são inspecionados separadamente do treinamento (que continua em
+// rodarPipelineComProgresso). Ver app/backend/main.py.
+// ---------------------------------------------------------------------------
+
+export interface ResultadoConstrucao {
+  colunas_novas: string[];
+  n_colunas_total: number;
+  amostra: Record<string, unknown>[];
+}
+
+export interface ItemIVDetalhado extends ItemIV {
+  classificacao: string;
+}
+
+export interface ResultadoCategorizacaoTransformacao {
+  n_variaveis: number;
+  iv: ItemIVDetalhado[];
+}
+
+export async function rodarConstrucao(dataset: string): Promise<ResultadoConstrucao> {
+  const resp = await fetch(`${URL_API}/api/modulo/construcao?${new URLSearchParams({ dataset })}`, {
+    method: "POST",
+  });
+  if (!resp.ok) throw new Error(`Falha ao rodar construção (${resp.status})`);
+  return resp.json();
+}
+
+export async function rodarCategorizacaoTransformacao(
+  dataset: string,
+  usarConstrucao: boolean,
+): Promise<ResultadoCategorizacaoTransformacao> {
+  const params = new URLSearchParams({ dataset, usar_construcao: String(usarConstrucao) });
+  const resp = await fetch(`${URL_API}/api/modulo/categorizacao-transformacao?${params}`, {
+    method: "POST",
+  });
+  if (!resp.ok) throw new Error(`Falha ao rodar categorização + transformação (${resp.status})`);
+  return resp.json();
+}
+
 export async function prepararDataset(
   config: ConfigPreparar,
 ): Promise<{ nome_dataset: string; n_dev: number; n_teste: number }> {
