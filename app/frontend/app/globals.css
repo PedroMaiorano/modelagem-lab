@@ -7,3 +7,31 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
+
+/* "Piscando" quando uma atualização é aceita ao vivo (Modelo atual) — o
+   elemento é remontado (via `key` ligada ao contador de eventos) toda vez
+   que muda, o que retrigger a animação automaticamente, sem precisar de
+   setState/JS extra pra controlar o timing. */
+@keyframes destaque-atualizado {
+  0% {
+    background-color: rgb(16 185 129 / 0.4);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.destaque-atualizado {
+  animation: destaque-atualizado 1200ms ease-out;
+}
+
+@keyframes anel-atualizado {
+  0% {
+    box-shadow: 0 0 0 0 rgb(16 185 129 / 0.6);
+  }
+  100% {
+    box-shadow: 0 0 0 8px rgb(16 185 129 / 0);
+  }
+}
+.anel-atualizado {
+  animation: anel-atualizado 1200ms ease-out;
+}

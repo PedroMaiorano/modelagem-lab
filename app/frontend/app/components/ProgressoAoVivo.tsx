@@ -22,7 +22,11 @@ export default function ProgressoAoVivo({ linhas, rodando }: Props) {
   const fimRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fimRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    // "smooth" quebra em runs rápidos: cada linha nova interrompe a
+    // animação da anterior e o scroll nunca alcança o fim de verdade
+    // (parecia "travado" — bug real reportado testando com o backend).
+    // Log ao vivo se comporta como terminal: pula direto pro fim.
+    fimRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [linhas]);
 
   if (linhas.length === 0 && !rodando) {

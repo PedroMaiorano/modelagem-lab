@@ -36,21 +36,32 @@ function useCronometro(rodando: boolean): number {
 export default function ModeloAoVivo({ estado, rodando }: Props) {
   const segundos = useCronometro(rodando);
   const { variaveisAtuais, scoreAtual, estagioAtual, nEventosAceitos } = estado;
+  const ultimaVariavel = variaveisAtuais[variaveisAtuais.length - 1];
 
   return (
-    <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
+    <div
+      className={`rounded-xl border border-slate-700 bg-slate-900/70 p-4 ${
+        rodando ? "ring-1 ring-emerald-800/60" : ""
+      }`}
+    >
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Modelo atual</h3>
         {rodando && (
           <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
             {segundos}s · {nEventosAceitos} atualizações aceitas
           </span>
         )}
       </div>
 
       <div className="mb-3 flex items-baseline gap-2">
-        <span className="text-2xl font-semibold tabular-nums text-slate-100">
+        {/* `key` ligada ao contador de eventos remonta o span a cada
+            atualização aceita, retriggerando a animação de flash — é o
+            "piscando" pedido pra mostrar visualmente que algo mudou. */}
+        <span
+          key={nEventosAceitos}
+          className="rounded px-1.5 text-2xl font-semibold tabular-nums text-slate-100 destaque-atualizado"
+        >
           {scoreAtual !== null ? scoreAtual.toFixed(4) : "—"}
         </span>
         <span className="text-xs text-slate-500">score</span>
@@ -68,7 +79,9 @@ export default function ModeloAoVivo({ estado, rodando }: Props) {
           {variaveisAtuais.map((v) => (
             <span
               key={v}
-              className="rounded-full border border-emerald-800 bg-emerald-950/50 px-2.5 py-1 text-xs text-emerald-300"
+              className={`rounded-full border border-emerald-800 bg-emerald-950/50 px-2.5 py-1 text-xs text-emerald-300 ${
+                v === ultimaVariavel ? "anel-atualizado" : ""
+              }`}
             >
               {v}
             </span>

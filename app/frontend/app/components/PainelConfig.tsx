@@ -311,7 +311,7 @@ export default function PainelConfig({ config, aoMudar, rodando }: Props) {
             descricao="entre pares muito correlacionados (bases diferentes), mantém o de maior IV"
             valor={config.limiar_correlacao}
             aoMudar={(v) => atualizar("limiar_correlacao", v)}
-            padrao={0.9}
+            padrao={0.7}
             passo={0.05}
             disabled={rodando || !config.usar_pre_selecao}
           />

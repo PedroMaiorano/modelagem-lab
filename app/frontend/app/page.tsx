@@ -42,7 +42,7 @@ const CONFIG_INICIAL: ConfigPipeline = {
   usar_pre_selecao: false,
   limiar_variancia: 1e-6,
   limiar_iv: 0.02,
-  limiar_correlacao: 0.9,
+  limiar_correlacao: 0.7,
   p_valor_maximo: null,
 };
 

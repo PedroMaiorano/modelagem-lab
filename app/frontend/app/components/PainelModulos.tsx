@@ -7,6 +7,7 @@ import {
   rodarConstrucao,
   rodarPreSelecao,
   type ParConstrucao,
+  type ParCorrelacionado,
   type ResultadoCategorizacaoTransformacao,
   type ResultadoConstrucao,
   type ResultadoPreSelecao,
@@ -14,6 +15,23 @@ import {
 
 interface Props {
   dataset: string;
+}
+
+/** Agrupa por "mantida" — o display anterior repetia a mesma sobrevivente
+ * numa linha por par descartado (dezenas de linhas quase idênticas quando
+ * uma variável de referência, tipo um índice de bin, correlaciona com
+ * muitas razões derivadas dela). Uma linha por sobrevivente é bem mais
+ * fácil de escanear. */
+function agruparPorMantida(
+  pares: ParCorrelacionado[],
+): { mantida: string; descartadas: { nome: string; correlacao: number }[] }[] {
+  const grupos = new Map<string, { nome: string; correlacao: number }[]>();
+  for (const p of pares) {
+    const lista = grupos.get(p.mantida) ?? [];
+    lista.push({ nome: p.descartada, correlacao: p.correlacao });
+    grupos.set(p.mantida, lista);
+  }
+  return [...grupos.entries()].map(([mantida, descartadas]) => ({ mantida, descartadas }));
 }
 
 function rotuloPar(p: ParConstrucao): string {
@@ -128,11 +146,13 @@ function CampoLimiar({
   valor,
   aoMudar,
   passo,
+  padrao,
 }: {
   rotulo: string;
   valor: number | null;
   aoMudar: (v: number | null) => void;
   passo: number;
+  padrao: number;
 }) {
   const ativo = valor !== null;
   return (
@@ -141,7 +161,7 @@ function CampoLimiar({
         <input
           type="checkbox"
           checked={ativo}
-          onChange={(e) => aoMudar(e.target.checked ? passo * 10 : null)}
+          onChange={(e) => aoMudar(e.target.checked ? padrao : null)}
           className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500"
         />
         {rotulo}
@@ -236,7 +256,7 @@ export default function PainelModulos({ dataset }: Props) {
 
   const [limiarVariancia, setLimiarVariancia] = useState<number | null>(1e-6);
   const [limiarIV, setLimiarIV] = useState<number | null>(0.02);
-  const [limiarCorrelacao, setLimiarCorrelacao] = useState<number | null>(0.9);
+  const [limiarCorrelacao, setLimiarCorrelacao] = useState<number | null>(0.7);
   const [rodandoPreSelecao, setRodandoPreSelecao] = useState(false);
   const [resultadoPreSelecao, setResultadoPreSelecao] = useState<ResultadoPreSelecao | null>(null);
   const [erroPreSelecao, setErroPreSelecao] = useState<string | null>(null);
@@ -354,22 +374,33 @@ export default function PainelModulos({ dataset }: Props) {
             )}
           </div>
           {paresCustomizados.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {paresCustomizados.map((par, i) => (
-                <span
-                  key={i}
-                  className="flex items-center gap-1.5 rounded-full border border-slate-600 bg-slate-800 px-2.5 py-1 text-[11px] text-slate-300"
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-[11px] text-slate-500">{paresCustomizados.length} pares selecionados</span>
+                <button
+                  onClick={() => setParesCustomizados([])}
+                  className="text-[11px] text-slate-500 hover:text-red-400"
                 >
-                  {rotuloPar(par)}
-                  <button
-                    onClick={() => removerPar(i)}
-                    className="text-slate-500 hover:text-red-400"
-                    aria-label={`Remover ${rotuloPar(par)}`}
+                  limpar todos
+                </button>
+              </div>
+              <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-slate-800 p-2">
+                {paresCustomizados.map((par, i) => (
+                  <span
+                    key={i}
+                    className="flex h-fit items-center gap-1.5 rounded-full border border-slate-600 bg-slate-800 px-2.5 py-1 text-[11px] text-slate-300"
                   >
-                    ×
-                  </button>
-                </span>
-              ))}
+                    {rotuloPar(par)}
+                    <button
+                      onClick={() => removerPar(i)}
+                      className="text-slate-500 hover:text-red-400"
+                      aria-label={`Remover ${rotuloPar(par)}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
             </div>
           )}
           {erroConstrucao && <p className="text-xs text-red-400">{erroConstrucao}</p>}
@@ -388,11 +419,11 @@ export default function PainelModulos({ dataset }: Props) {
                   {resultadoConstrucao.colunas_novas.length} colunas novas de{" "}
                   {resultadoConstrucao.n_colunas_total} candidatas totais:
                 </p>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-slate-800 p-2">
                   {resultadoConstrucao.colunas_novas.map((c) => (
                     <span
                       key={c}
-                      className="rounded-full border border-sky-800 bg-sky-950/50 px-2 py-0.5 text-[11px] text-sky-300"
+                      className="h-fit rounded-full border border-sky-800 bg-sky-950/50 px-2 py-0.5 text-[11px] text-sky-300"
                     >
                       {c}
                     </span>
@@ -459,9 +490,21 @@ export default function PainelModulos({ dataset }: Props) {
         acoes={botao(rodandoPreSelecao, () => void aoRodarPreSelecao(), "Rodar")}
       >
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <CampoLimiar rotulo="variância mín." valor={limiarVariancia} aoMudar={setLimiarVariancia} passo={0.000001} />
-          <CampoLimiar rotulo="IV mín." valor={limiarIV} aoMudar={setLimiarIV} passo={0.01} />
-          <CampoLimiar rotulo="correlação máx." valor={limiarCorrelacao} aoMudar={setLimiarCorrelacao} passo={0.05} />
+          <CampoLimiar
+            rotulo="variância mín."
+            valor={limiarVariancia}
+            aoMudar={setLimiarVariancia}
+            passo={0.000001}
+            padrao={1e-6}
+          />
+          <CampoLimiar rotulo="IV mín." valor={limiarIV} aoMudar={setLimiarIV} passo={0.01} padrao={0.02} />
+          <CampoLimiar
+            rotulo="correlação máx."
+            valor={limiarCorrelacao}
+            aoMudar={setLimiarCorrelacao}
+            passo={0.05}
+            padrao={0.7}
+          />
         </div>
         {erroPreSelecao && <p className="text-xs text-red-400">{erroPreSelecao}</p>}
         {!resultadoPreSelecao && !erroPreSelecao && <p className="text-xs text-slate-600">Ainda não rodado.</p>}
@@ -479,16 +522,33 @@ export default function PainelModulos({ dataset }: Props) {
             {resultadoPreSelecao.pares_correlacionados_descartados.length > 0 && (
               <div>
                 <p className="mb-1.5 text-[11px] text-slate-500">
-                  Pares correlacionados (manteve a de maior IV):
+                  {resultadoPreSelecao.pares_correlacionados_descartados.length} pares correlacionados —
+                  manteve a de maior IV, agrupado por sobrevivente:
                 </p>
-                <div className="flex flex-col gap-1 text-[11px] text-slate-400">
-                  {resultadoPreSelecao.pares_correlacionados_descartados.map((p, i) => (
-                    <div key={i}>
-                      <span className="text-emerald-400">{p.mantida}</span> em vez de{" "}
-                      <span className="text-slate-500 line-through">{p.descartada}</span> (r=
-                      {p.correlacao.toFixed(2)})
-                    </div>
-                  ))}
+                <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-800">
+                  <table className="w-full text-left text-[11px]">
+                    <thead className="sticky top-0 bg-slate-900">
+                      <tr className="border-b border-slate-800 text-slate-500">
+                        <th className="px-2 py-1.5 font-medium">manteve</th>
+                        <th className="px-2 py-1.5 font-medium">descartou</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {agruparPorMantida(resultadoPreSelecao.pares_correlacionados_descartados).map((g) => (
+                        <tr key={g.mantida} className="border-b border-slate-800/60 last:border-0">
+                          <td className="px-2 py-1.5 align-top text-emerald-400">{g.mantida}</td>
+                          <td className="px-2 py-1.5 text-slate-400">
+                            {g.descartadas.map((d) => (
+                              <span key={d.nome} className="mr-2 inline-block">
+                                {d.nome}{" "}
+                                <span className="text-slate-600">(r={d.correlacao.toFixed(2)})</span>
+                              </span>
+                            ))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             )}
