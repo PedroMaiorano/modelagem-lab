@@ -153,7 +153,7 @@ def tentar_nivel2(
         candidatos = forward_duplo(
             estimator, metric, df_dev, df_teste, novo_estado.variables, config.n_best_duplo, config.n_jobs
         )
-        melhor = _melhor(candidatos)
+        melhor = _melhor(candidatos, config.p_valor_maximo)
         if melhor is not None and melhor.score > novo_estado.score and melhor.model is not None:
             v, w = melhor.added
             novo_estado = SelectionState(
@@ -167,7 +167,7 @@ def tentar_nivel2(
         candidatos = transformacao_simples(
             estimator, metric, df_dev, df_teste, novo_estado.variables, config.n_jobs
         )
-        melhor = _melhor(candidatos)
+        melhor = _melhor(candidatos, config.p_valor_maximo)
         if melhor is not None and melhor.score > novo_estado.score and melhor.model is not None:
             var_out, var_in = melhor.removed[0], melhor.added[0]
             novas_variaveis = tuple(v for v in novo_estado.variables if v != var_out) + (var_in,)
@@ -219,7 +219,7 @@ def tentar_nivel_triplo(
         config.n_best_triplo_2,
         config.n_jobs,
     )
-    melhor = _melhor(candidatos)
+    melhor = _melhor(candidatos, config.p_valor_maximo)
     if melhor is not None and melhor.score > estado.score and melhor.model is not None:
         v1, v2, v3 = melhor.added
         novo_estado = SelectionState(

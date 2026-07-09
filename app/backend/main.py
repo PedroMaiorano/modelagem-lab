@@ -36,6 +36,7 @@ from logica import (
     rodar_categorizacao_transformacao,
     rodar_construcao,
     rodar_pipeline,
+    rodar_pre_selecao,
 )
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
@@ -103,6 +104,7 @@ class ConfigCategorizacaoTransformacao(BaseModel):
     usar_construcao: bool = True
     pares_customizados: list[ParConstrucaoAPI] = []
     gerar_transformacoes_potencia: bool = True
+    gerar_bin_ordinal: bool = True
 
 
 @app.post("/api/modulo/categorizacao-transformacao")
@@ -115,6 +117,35 @@ def rota_rodar_categorizacao_transformacao(config: ConfigCategorizacaoTransforma
         usar_construcao=config.usar_construcao,
         pares_customizados=pares,
         gerar_transformacoes_potencia=config.gerar_transformacoes_potencia,
+        gerar_bin_ordinal=config.gerar_bin_ordinal,
+    )
+
+
+class ConfigPreSelecao(BaseModel):
+    dataset: str
+    usar_construcao: bool = True
+    pares_customizados: list[ParConstrucaoAPI] = []
+    gerar_transformacoes_potencia: bool = True
+    gerar_bin_ordinal: bool = True
+    limiar_variancia: float | None = 1e-6
+    limiar_iv: float | None = 0.02
+    limiar_correlacao: float | None = 0.9
+
+
+@app.post("/api/modulo/pre-selecao")
+def rota_rodar_pre_selecao(config: ConfigPreSelecao) -> dict[str, Any]:
+    if config.dataset not in listar_datasets():
+        raise HTTPException(status_code=404, detail=f"Dataset '{config.dataset}' não encontrado")
+    pares = [_par_construcao(p) for p in config.pares_customizados]
+    return rodar_pre_selecao(
+        config.dataset,
+        usar_construcao=config.usar_construcao,
+        pares_customizados=pares,
+        gerar_transformacoes_potencia=config.gerar_transformacoes_potencia,
+        gerar_bin_ordinal=config.gerar_bin_ordinal,
+        limiar_variancia=config.limiar_variancia,
+        limiar_iv=config.limiar_iv,
+        limiar_correlacao=config.limiar_correlacao,
     )
 
 
@@ -260,6 +291,14 @@ class ConfigPipeline(BaseModel):
     n_best_backward: int = 2
     profundidade_maxima_nivel3: int = 2
     gerar_transformacoes_potencia: bool = True
+    gerar_bin_ordinal: bool = True
+    # Pré-seleção (módulo 3) — opt-in, aplicada antes do treinamento
+    usar_pre_selecao: bool = False
+    limiar_variancia: float | None = 1e-6
+    limiar_iv: float | None = 0.02
+    limiar_correlacao: float | None = 0.9
+    # Restrição de significância — None desliga (padrão)
+    p_valor_maximo: float | None = None
 
 
 def _worker(config: ConfigPipeline, fila: queue.Queue[dict[str, Any] | None]) -> None:
@@ -284,6 +323,12 @@ def _worker(config: ConfigPipeline, fila: queue.Queue[dict[str, Any] | None]) ->
             n_best_backward=config.n_best_backward,
             profundidade_maxima_nivel3=config.profundidade_maxima_nivel3,
             gerar_transformacoes_potencia=config.gerar_transformacoes_potencia,
+            gerar_bin_ordinal=config.gerar_bin_ordinal,
+            usar_pre_selecao=config.usar_pre_selecao,
+            limiar_variancia=config.limiar_variancia,
+            limiar_iv=config.limiar_iv,
+            limiar_correlacao=config.limiar_correlacao,
+            p_valor_maximo=config.p_valor_maximo,
             fila=fila,  # type: ignore[arg-type]
         )
         fila.put(resultado)

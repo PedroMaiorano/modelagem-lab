@@ -111,6 +111,11 @@ class Level1Config:
     min_vars_para_backward: int = 5
     n_jobs: int = N_JOBS_PADRAO
     shadow_probing: ShadowProbingConfig = field(default_factory=ShadowProbingConfig)
+    # Restrição (não objetivo — quem manda continua sendo o KS): candidatas
+    # que ADICIONAM variável só são elegíveis se o p-valor do coeficiente
+    # ficar <= isto. `None` desliga (comportamento de sempre). Nunca se
+    # aplica a remoções (backward). Ver `selection._passa_significancia`.
+    p_valor_maximo: float | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +133,7 @@ class Level2Config:
     n_best_triplo_2: int = 2
     min_vars_para_backward: int = 5
     n_jobs: int = N_JOBS_PADRAO
+    p_valor_maximo: float | None = None
 
 
 @dataclass(frozen=True)

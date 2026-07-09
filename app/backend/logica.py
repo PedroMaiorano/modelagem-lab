@@ -16,6 +16,7 @@ import logging
 import queue
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
@@ -37,6 +38,7 @@ from pedro_wise.types import (  # noqa: E402
     SelectionState,
     ShadowProbingConfig,
 )
+from preselecao import pre_selecionar  # noqa: E402
 from sklearn.metrics import roc_auc_score  # noqa: E402
 from transformacao import ajustar_woe, aplicar_woe, classificar_iv, gerar_transformacoes_fixas  # noqa: E402
 
@@ -85,14 +87,43 @@ def carregar_dataset(nome: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     return pd.read_csv(pasta / "dev.csv"), pd.read_csv(pasta / "teste.csv")
 
 
+def _resumo_coluna(serie: pd.Series) -> dict[str, Any]:
+    """Perfil rápido de uma coluna — numérica (min/max/média/desvio) ou
+    categórica (top valores) — mais % de ausentes, comum aos dois casos.
+    """
+    n = len(serie)
+    pct_ausente = float(serie.isna().mean()) if n else 0.0
+    if pd.api.types.is_numeric_dtype(serie):
+        descricao = serie.describe()
+        return {
+            "tipo": "numerico",
+            "pct_ausente": pct_ausente,
+            "minimo": float(descricao.get("min", float("nan"))),
+            "maximo": float(descricao.get("max", float("nan"))),
+            "media": float(descricao.get("mean", float("nan"))),
+            "desvio_padrao": float(descricao.get("std", float("nan"))),
+        }
+    contagens = serie.value_counts(dropna=True).head(5)
+    return {
+        "tipo": "categorico",
+        "pct_ausente": pct_ausente,
+        "n_distintos": int(serie.nunique(dropna=True)),
+        "top_valores": [{"valor": str(v), "contagem": int(c)} for v, c in contagens.items()],
+    }
+
+
 def preview_dataset(nome: str, n: int = 5) -> dict[str, Any]:
     df_dev, df_teste = carregar_dataset(nome)
     colunas_numericas = [c for c in df_dev.columns if c != "y" and pd.api.types.is_numeric_dtype(df_dev[c])]
+    resumo_colunas = {c: _resumo_coluna(df_dev[c]) for c in df_dev.columns if c != "y"}
     return {
         "colunas": list(df_dev.columns),
         "colunas_numericas": colunas_numericas,
         "n_dev": len(df_dev),
         "n_teste": len(df_teste),
+        "taxa_evento_dev": float(df_dev["y"].mean()) if "y" in df_dev.columns else None,
+        "taxa_evento_teste": float(df_teste["y"].mean()) if "y" in df_teste.columns else None,
+        "resumo_colunas": resumo_colunas,
         "amostra": df_dev.head(n).to_dict(orient="records"),
     }
 
@@ -148,14 +179,19 @@ def _categorizar_e_transformar(
     df_teste: pd.DataFrame,
     fila: queue.Queue[dict[str, Any]],
     gerar_transformacoes_potencia: bool = True,
+    gerar_bin_ordinal: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
     """Categorização (bins monotônicos) + transformação (WOE) — módulos
     isolados, ver `python/categorizacao/` e `python/transformacao/`. Para
     variáveis numéricas, opcionalmente também gera log/raiz/quad/cubo/
-    inversas (`gerar_transformacoes_fixas`) como candidatas extras — o
-    Pedro_Wise (nível 1, `transformacao_simples`) já sabe testar trocar a
-    versão WOE por uma dessas via `pedro_wise.base.extrair_base`, desde que
-    compartilhem o mesmo prefixo de base, que é o que garantimos aqui.
+    inversas (`gerar_transformacoes_fixas`) e o índice do bin monotônico
+    (`{base}_bin`, ordinal 0..k) como candidatas extras — o Pedro_Wise
+    (nível 1, `transformacao_simples`) já sabe testar trocar a versão WOE
+    por uma dessas via `pedro_wise.base.extrair_base`, desde que
+    compartilhem o mesmo prefixo de base, que é o que garantimos aqui. O bin
+    ordinal serve pra quem prefere um modelo mais "clássico"/explicável
+    (faixa em vez de WOE) — é o mesmo `bin_dev`/`bin_teste` já calculado pro
+    WOE, só exposto como coluna também, sem custo extra de computação.
     """
     colunas_candidatas = [c for c in df_dev.columns if c != "y"]
     fila.put({"tipo": "etapa", "mensagem": f"Categorização + WOE: {len(colunas_candidatas)} candidatas"})
@@ -194,10 +230,19 @@ def _categorizar_e_transformar(
             nome_woe = f"{base_semantica}_woe"
             woe_dev[nome_woe] = aplicar_woe(bin_dev, tabela)
             woe_teste[nome_woe] = aplicar_woe(bin_teste, tabela)
-            iv_por_variavel[coluna] = tabela.iv_total
+            # Chave = base semântica (não `coluna` crua) — pra bater com
+            # `pedro_wise.base.extrair_base` de qualquer derivada (`_woe`,
+            # `_bin`, `_log`...) no módulo de pré-seleção, que precisa achar
+            # o IV de uma variável a partir do nome de QUALQUER versão dela.
+            iv_por_variavel[base_semantica] = tabela.iv_total
             classificacao = classificar_iv(tabela.iv_total)
             mensagem = f"  {coluna}: IV={tabela.iv_total:.4f} ({classificacao})"
             fila.put({"tipo": "log", "mensagem": mensagem})
+
+            if gerar_bin_ordinal and eh_numerica:
+                nome_bin = f"{base_semantica}_bin"
+                woe_dev[nome_bin] = bin_dev.astype(float)
+                woe_teste[nome_bin] = bin_teste.astype(float)
 
             if gerar_transformacoes_potencia and eh_numerica:
                 extras_dev = gerar_transformacoes_fixas(df_dev[coluna], base_semantica)
@@ -226,6 +271,7 @@ def _construir_e_transformar(
     df_teste: pd.DataFrame,
     fila: queue.Queue[dict[str, Any]],
     gerar_transformacoes_potencia: bool = True,
+    gerar_bin_ordinal: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
     """Composição construção → categorização → transformação, usada pelo
     pipeline "rodar tudo de uma vez" (`rodar_pipeline`). Os módulos também
@@ -236,7 +282,11 @@ def _construir_e_transformar(
     """
     df_dev, df_teste, _ = _construir(df_dev, df_teste, fila)
     return _categorizar_e_transformar(
-        df_dev, df_teste, fila, gerar_transformacoes_potencia=gerar_transformacoes_potencia
+        df_dev,
+        df_teste,
+        fila,
+        gerar_transformacoes_potencia=gerar_transformacoes_potencia,
+        gerar_bin_ordinal=gerar_bin_ordinal,
     )
 
 
@@ -260,6 +310,7 @@ def rodar_categorizacao_transformacao(
     usar_construcao: bool = True,
     pares_customizados: list[ParConstrucao] | None = None,
     gerar_transformacoes_potencia: bool = True,
+    gerar_bin_ordinal: bool = True,
 ) -> dict[str, Any]:
     """Roda construção (opcional) + categorização + transformação, pra
     inspeção isolada (Fase 3 — UI modular). Não persiste nada.
@@ -269,12 +320,62 @@ def rodar_categorizacao_transformacao(
     if usar_construcao:
         df_dev, df_teste, _ = _construir(df_dev, df_teste, fila, pares_customizados=pares_customizados)
     _, _, iv_por_variavel = _categorizar_e_transformar(
-        df_dev, df_teste, fila, gerar_transformacoes_potencia=gerar_transformacoes_potencia
+        df_dev,
+        df_teste,
+        fila,
+        gerar_transformacoes_potencia=gerar_transformacoes_potencia,
+        gerar_bin_ordinal=gerar_bin_ordinal,
     )
     iv_ordenado = sorted(iv_por_variavel.items(), key=lambda kv: kv[1], reverse=True)
     return {
         "n_variaveis": len(iv_por_variavel),
         "iv": [{"variavel": v, "iv": iv, "classificacao": classificar_iv(iv)} for v, iv in iv_ordenado],
+    }
+
+
+def rodar_pre_selecao(
+    dataset: str,
+    usar_construcao: bool = True,
+    pares_customizados: list[ParConstrucao] | None = None,
+    gerar_transformacoes_potencia: bool = True,
+    gerar_bin_ordinal: bool = True,
+    limiar_variancia: float | None = 1e-6,
+    limiar_iv: float | None = 0.02,
+    limiar_correlacao: float | None = 0.9,
+) -> dict[str, Any]:
+    """Roda construção (opcional) + categorização + transformação, seguido
+    da pré-seleção (variância + IV + correlação, `python/preselecao/`) —
+    módulo isolado (Fase 3 — UI modular). Não persiste nada; cada limiar
+    pode ser `None` pra pular aquele filtro.
+    """
+    df_dev, df_teste = carregar_dataset(dataset)
+    fila: queue.Queue[dict[str, Any]] = queue.Queue()
+    if usar_construcao:
+        df_dev, df_teste, _ = _construir(df_dev, df_teste, fila, pares_customizados=pares_customizados)
+    woe_dev, _, iv_por_variavel = _categorizar_e_transformar(
+        df_dev,
+        df_teste,
+        fila,
+        gerar_transformacoes_potencia=gerar_transformacoes_potencia,
+        gerar_bin_ordinal=gerar_bin_ordinal,
+    )
+    resultado = pre_selecionar(
+        woe_dev,
+        iv_por_variavel,
+        limiar_variancia=limiar_variancia,
+        limiar_iv=limiar_iv,
+        limiar_correlacao=limiar_correlacao,
+    )
+    return {
+        "n_inicial": resultado["n_inicial"],
+        "n_apos_variancia": resultado["n_apos_variancia"],
+        "n_apos_iv": resultado["n_apos_iv"],
+        "n_final": resultado["n_final"],
+        "colunas_mantidas": resultado["colunas_mantidas"],
+        "pares_correlacionados_descartados": [
+            {"mantida": a, "descartada": b, "correlacao": r}
+            for a, b, r in resultado["pares_correlacionados_descartados"]
+        ],
     }
 
 
@@ -347,12 +448,18 @@ def rodar_pipeline(
     n_best_backward: int = 2,
     profundidade_maxima_nivel3: int = 2,
     gerar_transformacoes_potencia: bool = True,
+    gerar_bin_ordinal: bool = True,
+    usar_pre_selecao: bool = False,
+    limiar_variancia: float | None = 1e-6,
+    limiar_iv: float | None = 0.02,
+    limiar_correlacao: float | None = 0.9,
+    p_valor_maximo: float | None = None,
     fila: queue.Queue[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Roda o pipeline (opcionalmente construção+categorização+WOE) seguido
-    do Pedro_Wise (níveis 1-2.5, ou 1-3 se `nivel3_ativado`), publicando
-    progresso em `fila` em tempo real via `CapturadorProgresso`. Retorna o
-    resultado final (também colocado na fila como último item, tipo
+    """Roda o pipeline (opcionalmente construção+categorização+WOE, opcionalmente
+    pré-seleção) seguido do Pedro_Wise (níveis 1-2.5, ou 1-3 se `nivel3_ativado`),
+    publicando progresso em `fila` em tempo real via `CapturadorProgresso`.
+    Retorna o resultado final (também colocado na fila como último item, tipo
     "resultado", pelo chamador).
     """
     fila = fila if fila is not None else queue.Queue()
@@ -363,8 +470,32 @@ def rodar_pipeline(
 
     if usar_pipeline_completo:
         df_dev, df_teste, iv_por_variavel = _construir_e_transformar(
-            df_dev, df_teste, fila, gerar_transformacoes_potencia=gerar_transformacoes_potencia
+            df_dev,
+            df_teste,
+            fila,
+            gerar_transformacoes_potencia=gerar_transformacoes_potencia,
+            gerar_bin_ordinal=gerar_bin_ordinal,
         )
+        if usar_pre_selecao:
+            resultado_selecao = pre_selecionar(
+                df_dev,
+                iv_por_variavel,
+                limiar_variancia=limiar_variancia,
+                limiar_iv=limiar_iv,
+                limiar_correlacao=limiar_correlacao,
+            )
+            colunas_mantidas = resultado_selecao["colunas_mantidas"]
+            fila.put(
+                {
+                    "tipo": "etapa",
+                    "mensagem": (
+                        f"Pré-seleção: {resultado_selecao['n_inicial']} → "
+                        f"{resultado_selecao['n_final']} candidatas"
+                    ),
+                }
+            )
+            df_dev = df_dev[[*colunas_mantidas, "y"]]
+            df_teste = df_teste[[*colunas_mantidas, "y"]]
     else:
         fila.put({"tipo": "etapa", "mensagem": "Rodando direto nas variáveis originais (sem pipeline)"})
 
@@ -389,6 +520,7 @@ def rodar_pipeline(
             backward_simples=backward_simples_nivel1,
             min_vars_para_backward=min_vars_para_backward,
             shadow_probing=ShadowProbingConfig(ativado=shadow_probing, semente=7),
+            p_valor_maximo=p_valor_maximo,
         )
         config2 = Level2Config(
             forward_duplo=forward_duplo,
@@ -398,6 +530,7 @@ def rodar_pipeline(
             n_best_duplo=n_best_duplo,
             n_best_triplo_1=n_best_triplo_1,
             n_best_triplo_2=n_best_triplo_2,
+            p_valor_maximo=p_valor_maximo,
         )
         if nivel3_ativado:
             config3 = Level3Config(
@@ -410,6 +543,42 @@ def rodar_pipeline(
             estado_final, trace = run_pedro_wise(
                 estimator, metric, df_dev, df_teste, estado_inicial, config1, config2
             )
+
+        # "guarda uma cópia sem o p-valor" — quando o filtro está ativo,
+        # roda de novo sem ele (mesmo tudo mais) só pra comparação, já que
+        # a restrição pode custar KS em troca de significância garantida.
+        resultado_sem_filtro_pvalor: dict[str, Any] | None = None
+        if p_valor_maximo is not None:
+            fila.put({"tipo": "etapa", "mensagem": "Rodando sem o filtro de p-valor, pra comparação"})
+            config1_livre = replace(config1, p_valor_maximo=None)
+            config2_livre = replace(config2, p_valor_maximo=None)
+            if nivel3_ativado:
+                estado_livre, _ = run_pedro_wise_completo(
+                    estimator, metric, df_dev, df_teste, estado_inicial, config1_livre, config2_livre, config3
+                )
+            else:
+                estado_livre, _ = run_pedro_wise(
+                    estimator, metric, df_dev, df_teste, estado_inicial, config1_livre, config2_livre
+                )
+            variaveis_livre = list(estado_livre.variables)
+            if variaveis_livre:
+                ks_livre = KSGaussianMetric(criterio="teste")(
+                    estado_livre.model,
+                    df_dev[variaveis_livre],
+                    df_dev["y"],
+                    df_teste[variaveis_livre],
+                    df_teste["y"],
+                )
+                auc_livre = float(
+                    roc_auc_score(df_teste["y"], estado_livre.model.predict_proba(df_teste[variaveis_livre]))
+                )
+            else:
+                ks_livre, auc_livre = 0.0, 0.5
+            resultado_sem_filtro_pvalor = {
+                "variaveis": variaveis_livre,
+                "ks_teste": ks_livre,
+                "auc": auc_livre,
+            }
     finally:
         logger_pedro_wise.removeHandler(handler)
         logger_pedro_wise.setLevel(nivel_anterior)
@@ -477,5 +646,6 @@ def rodar_pipeline(
         "intercepto_erro_padrao": intercepto_erro_padrao,
         "intercepto_p_valor": intercepto_p_valor,
         "coeficientes": coeficientes_variaveis,
+        "resultado_sem_filtro_pvalor": resultado_sem_filtro_pvalor,
         "tempo_segundos": round(time.perf_counter() - t0, 1),
     }

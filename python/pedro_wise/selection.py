@@ -177,8 +177,37 @@ def backward_simples(
     return [r for r in resultados if r is not None]
 
 
-def _melhor(candidatos: list[CandidateResult]) -> CandidateResult | None:
+def _passa_significancia(candidato: CandidateResult, p_valor_maximo: float) -> bool:
+    """`p_valor_maximo` é uma RESTRIÇÃO, não um critério de otimização — o KS
+    continua mandando (`_melhor` ainda escolhe por `score`), isto só reduz o
+    conjunto de candidatas elegíveis. Só se aplica a candidatas que
+    ADICIONAM variável (`candidato.added` não vazio) — remoções (backward)
+    nunca são bloqueadas por p-valor, faz sentido sempre poder simplificar
+    o modelo. Reavaliado a cada rodada do laço (`run_level1`/`run_level2`
+    chamam isto de novo a cada iteração): uma variável não-significativa
+    agora pode passar a ser significativa numa rodada futura, conforme o
+    conjunto de covariáveis muda — nunca fica banida permanentemente.
+
+    `FittedModel` (Protocol) não garante `estatisticas()` — só
+    `LogisticGLM` (o único estimador linear hoje) tem; pra outros
+    estimadores (hipotéticos, sem p-valor), a restrição é ignorada (não
+    filtra) em vez de quebrar.
+    """
+    if not candidato.added or candidato.model is None:
+        return True
+    estatisticas = getattr(candidato.model, "estatisticas", None)
+    if estatisticas is None:
+        return True
+    stats = estatisticas()
+    return all(stats.get(v, {}).get("p_valor", 0.0) <= p_valor_maximo for v in candidato.added)
+
+
+def _melhor(
+    candidatos: list[CandidateResult], p_valor_maximo: float | None = None
+) -> CandidateResult | None:
     validos = [c for c in candidatos if c.is_valid]
+    if p_valor_maximo is not None:
+        validos = [c for c in validos if _passa_significancia(c, p_valor_maximo)]
     if not validos:
         return None
     return max(validos, key=lambda c: c.score)
@@ -220,7 +249,7 @@ def run_level1(
                 candidatos = forward_simples(
                     estimator, metric, df_dev, df_teste, estado.variables, config.n_jobs
                 )
-                melhor = _melhor(candidatos)
+                melhor = _melhor(candidatos, config.p_valor_maximo)
                 if melhor is not None and melhor.score > estado.score and melhor.model is not None:
                     nova_var = melhor.added[0]
                     estado = SelectionState(
@@ -234,7 +263,7 @@ def run_level1(
             candidatos = transformacao_simples(
                 estimator, metric, df_dev, df_teste, estado.variables, config.n_jobs
             )
-            melhor = _melhor(candidatos)
+            melhor = _melhor(candidatos, config.p_valor_maximo)
             if melhor is not None and melhor.score > estado.score and melhor.model is not None:
                 var_out, var_in = melhor.removed[0], melhor.added[0]
                 novas_variaveis = tuple(v for v in estado.variables if v != var_out) + (var_in,)
