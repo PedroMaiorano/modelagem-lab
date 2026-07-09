@@ -4,7 +4,7 @@ import type { EventoResultado, FaixaDecil } from "../lib/api";
 
 function Metrica({ rotulo, valor }: { rotulo: string; valor: string }) {
   return (
-    <div className="rounded-xl border border-slate-800/50 bg-slate-900/30 px-4 py-3">
+    <div className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-3">
       <div className="text-[11px] uppercase tracking-wider text-slate-500">{rotulo}</div>
       <div className="mt-1 text-2xl font-semibold text-slate-100 tabular-nums">{valor}</div>
     </div>
@@ -160,7 +160,7 @@ export default function PainelResultado({ resultado }: { resultado: EventoResult
 
       {resultado.tabela_decis.length > 1 && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="rounded-xl border border-slate-800/50 bg-slate-900/30 p-4">
+          <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
             <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
               Curva KS (teste)
             </h3>
@@ -170,7 +170,7 @@ export default function PainelResultado({ resultado }: { resultado: EventoResult
             </p>
             <GraficoKS tabela={resultado.tabela_decis} />
           </div>
-          <div className="rounded-xl border border-slate-800/50 bg-slate-900/30 p-4">
+          <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
             <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
               Taxa de evento por faixa
             </h3>
@@ -187,7 +187,7 @@ export default function PainelResultado({ resultado }: { resultado: EventoResult
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Top Information Value
           </h3>
-          <div className="flex flex-col gap-2 rounded-xl border border-slate-800/50 bg-slate-900/30 p-4">
+          <div className="flex flex-col gap-2 rounded-xl border border-slate-700 bg-slate-900/70 p-4">
             {resultado.top_iv.map((item) => (
               <BarraIV key={item.variavel} variavel={item.variavel} iv={item.iv} maximo={maximoIV} />
             ))}

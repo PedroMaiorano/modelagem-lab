@@ -17,7 +17,7 @@ import queue
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, NamedTuple
 
 _RAIZ = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_RAIZ / "python"))
@@ -25,7 +25,7 @@ sys.path.insert(0, str(_RAIZ / "python"))
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from categorizacao import aplicar_bins, bins_monotonicos  # noqa: E402
-from construcao import construir_razoes_em_lote  # noqa: E402
+from construcao import construir_diferenca, construir_razao  # noqa: E402
 from pedro_wise.estimators import LogisticGLM  # noqa: E402
 from pedro_wise.level3 import run_pedro_wise_completo  # noqa: E402
 from pedro_wise.metrics import KSGaussianMetric  # noqa: E402
@@ -44,8 +44,17 @@ DIR_DADOS = _RAIZ / "data"
 
 # Razões de negócio padrão para o dataset credito_real — mesmas do script de
 # experimento (scripts/pipeline_completo_credito_real.py). Só aplicadas se
-# as colunas existirem no dataset escolhido.
+# as colunas existirem no dataset escolhido; funcionam como sugestão
+# automática, não excluem pares customizados que o usuário adicionar na UI
+# (ver ParConstrucao/rodar_construcao) — os dois se somam.
 PARES_RAZAO_CREDITO_REAL = [(f"PAYAMT{i}", f"BILLAMT{i}", f"proppaga{i}") for i in range(1, 7)]
+
+
+class ParConstrucao(NamedTuple):
+    numerador: str
+    denominador: str
+    nome: str
+    operacao: Literal["razao", "diferenca"] = "razao"
 
 
 class CapturadorProgresso(logging.Handler):
@@ -87,23 +96,49 @@ def preview_dataset(nome: str, n: int = 5) -> dict[str, Any]:
 
 
 def _construir(
-    df_dev: pd.DataFrame, df_teste: pd.DataFrame, fila: queue.Queue[dict[str, Any]]
+    df_dev: pd.DataFrame,
+    df_teste: pd.DataFrame,
+    fila: queue.Queue[dict[str, Any]],
+    pares_customizados: list[ParConstrucao] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
-    """Construção (razões de negócio, quando as colunas necessárias existem no
-    dataset). Módulo isolado — ver `python/construcao/`.
+    """Construção (razões/diferenças de negócio) — módulo isolado, ver
+    `python/construcao/`. Dois tipos de pares, somados:
+    - `PARES_RAZAO_CREDITO_REAL`: sugestão automática específica do dataset
+      `credito_real`, aplicada só se as colunas existirem.
+    - `pares_customizados`: definidos pelo usuário na UI (qualquer par de
+      colunas numéricas do dataset ativo, razão ou diferença) — é o que
+      generaliza o módulo pra além do `credito_real`.
     """
-    pares_aplicaveis = [
-        (num, den, nome)
+    pares_automaticos = [
+        ParConstrucao(num, den, nome, "razao")
         for num, den, nome in PARES_RAZAO_CREDITO_REAL
         if num in df_dev.columns and den in df_dev.columns
     ]
-    if not pares_aplicaveis:
+    pares_customizados = pares_customizados or []
+    pares_validos = [
+        p for p in pares_customizados if p.numerador in df_dev.columns and p.denominador in df_dev.columns
+    ]
+    n_ignorados = len(pares_customizados) - len(pares_validos)
+    if n_ignorados:
+        fila.put(
+            {"tipo": "log", "mensagem": f"  [pulado] {n_ignorados} par(es) customizados com coluna ausente"}
+        )
+
+    todos_pares = pares_automaticos + pares_validos
+    if not todos_pares:
         return df_dev, df_teste, []
 
-    fila.put({"tipo": "etapa", "mensagem": f"Construção: {len(pares_aplicaveis)} razões novas"})
-    df_dev = pd.concat([df_dev, construir_razoes_em_lote(df_dev, pares_aplicaveis)], axis=1)
-    df_teste = pd.concat([df_teste, construir_razoes_em_lote(df_teste, pares_aplicaveis)], axis=1)
-    return df_dev, df_teste, [nome for _, _, nome in pares_aplicaveis]
+    fila.put({"tipo": "etapa", "mensagem": f"Construção: {len(todos_pares)} variáveis novas"})
+    def _aplicar(p: ParConstrucao, df: pd.DataFrame) -> pd.Series:
+        if p.operacao == "razao":
+            return construir_razao(df[p.numerador], df[p.denominador], p.nome)
+        return construir_diferenca(df[p.numerador], df[p.denominador], p.nome)
+
+    novas_dev = {p.nome: _aplicar(p, df_dev) for p in todos_pares}
+    novas_teste = {p.nome: _aplicar(p, df_teste) for p in todos_pares}
+    df_dev = pd.concat([df_dev, pd.DataFrame(novas_dev, index=df_dev.index)], axis=1)
+    df_teste = pd.concat([df_teste, pd.DataFrame(novas_teste, index=df_teste.index)], axis=1)
+    return df_dev, df_teste, [p.nome for p in todos_pares]
 
 
 def _categorizar_e_transformar(
@@ -167,14 +202,14 @@ def _construir_e_transformar(
     return _categorizar_e_transformar(df_dev, df_teste, fila)
 
 
-def rodar_construcao(dataset: str) -> dict[str, Any]:
+def rodar_construcao(dataset: str, pares_customizados: list[ParConstrucao] | None = None) -> dict[str, Any]:
     """Roda só o módulo de construção, pra inspeção isolada (Fase 3 — UI
     modular). Não persiste nada; se não houver razões aplicáveis ao
-    dataset, `colunas_novas` vem vazio.
+    dataset nem pares customizados, `colunas_novas` vem vazio.
     """
     df_dev, df_teste = carregar_dataset(dataset)
     fila: queue.Queue[dict[str, Any]] = queue.Queue()
-    df_dev, _, colunas_novas = _construir(df_dev, df_teste, fila)
+    df_dev, _, colunas_novas = _construir(df_dev, df_teste, fila, pares_customizados=pares_customizados)
     return {
         "colunas_novas": colunas_novas,
         "n_colunas_total": len([c for c in df_dev.columns if c != "y"]),
@@ -182,14 +217,16 @@ def rodar_construcao(dataset: str) -> dict[str, Any]:
     }
 
 
-def rodar_categorizacao_transformacao(dataset: str, usar_construcao: bool = True) -> dict[str, Any]:
+def rodar_categorizacao_transformacao(
+    dataset: str, usar_construcao: bool = True, pares_customizados: list[ParConstrucao] | None = None
+) -> dict[str, Any]:
     """Roda construção (opcional) + categorização + transformação, pra
     inspeção isolada (Fase 3 — UI modular). Não persiste nada.
     """
     df_dev, df_teste = carregar_dataset(dataset)
     fila: queue.Queue[dict[str, Any]] = queue.Queue()
     if usar_construcao:
-        df_dev, df_teste, _ = _construir(df_dev, df_teste, fila)
+        df_dev, df_teste, _ = _construir(df_dev, df_teste, fila, pares_customizados=pares_customizados)
     _, _, iv_por_variavel = _categorizar_e_transformar(df_dev, df_teste, fila)
     iv_ordenado = sorted(iv_por_variavel.items(), key=lambda kv: kv[1], reverse=True)
     return {

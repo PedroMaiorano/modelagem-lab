@@ -27,15 +27,15 @@ export default function ProgressoAoVivo({ linhas, rodando }: Props) {
 
   if (linhas.length === 0 && !rodando) {
     return (
-      <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-slate-800/50 text-sm text-slate-600">
+      <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-slate-700 text-sm text-slate-600">
         Configure acima e clique em &ldquo;Rodar seleção&rdquo; na barra lateral.
       </div>
     );
   }
 
   return (
-    <div className="rounded-xl border border-slate-800/50 bg-slate-900/30">
-      <div className="flex items-center gap-2 border-b border-slate-800/50 px-4 py-2.5">
+    <div className="rounded-xl border border-slate-700 bg-slate-900/70">
+      <div className="flex items-center gap-2 border-b border-slate-700 px-4 py-2.5">
         <span className={`h-2 w-2 rounded-full ${rodando ? "bg-emerald-500 animate-pulse" : "bg-slate-600"}`} />
         <span className="text-xs font-medium text-slate-400">
           {rodando ? "Rodando…" : "Concluído"}

@@ -1,15 +1,104 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  buscarPreviewDataset,
   rodarCategorizacaoTransformacao,
   rodarConstrucao,
+  type ParConstrucao,
   type ResultadoCategorizacaoTransformacao,
   type ResultadoConstrucao,
 } from "../lib/api";
 
 interface Props {
   dataset: string;
+}
+
+function rotuloPar(p: ParConstrucao): string {
+  const simbolo = p.operacao === "razao" ? "/" : "-";
+  return p.nome || `${p.numerador} ${simbolo} ${p.denominador}`;
+}
+
+function FormularioParConstrucao({
+  colunas,
+  aoAdicionar,
+}: {
+  colunas: string[];
+  aoAdicionar: (par: ParConstrucao) => void;
+}) {
+  const [numerador, setNumerador] = useState("");
+  const [denominador, setDenominador] = useState("");
+  const [operacao, setOperacao] = useState<ParConstrucao["operacao"]>("razao");
+  const [nome, setNome] = useState("");
+
+  function adicionar() {
+    if (!numerador || !denominador || numerador === denominador) return;
+    aoAdicionar({ numerador, denominador, operacao, nome: nome.trim() || undefined });
+    setNome("");
+  }
+
+  return (
+    <div className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-700 bg-slate-800/60 p-3">
+      <div>
+        <label className="mb-1 block text-[11px] text-slate-500">numerador / A</label>
+        <select
+          value={numerador}
+          onChange={(e) => setNumerador(e.target.value)}
+          className="rounded-md bg-slate-800 border border-slate-600 px-2 py-1 text-xs text-slate-100"
+        >
+          <option value="">selecione…</option>
+          {colunas.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </div>
+      <span className="pb-1.5 text-xs text-slate-500">{operacao === "razao" ? "/" : "−"}</span>
+      <div>
+        <label className="mb-1 block text-[11px] text-slate-500">denominador / B</label>
+        <select
+          value={denominador}
+          onChange={(e) => setDenominador(e.target.value)}
+          className="rounded-md bg-slate-800 border border-slate-600 px-2 py-1 text-xs text-slate-100"
+        >
+          <option value="">selecione…</option>
+          {colunas.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="mb-1 block text-[11px] text-slate-500">operação</label>
+        <select
+          value={operacao}
+          onChange={(e) => setOperacao(e.target.value as ParConstrucao["operacao"])}
+          className="rounded-md bg-slate-800 border border-slate-600 px-2 py-1 text-xs text-slate-100"
+        >
+          <option value="razao">razão (A / B)</option>
+          <option value="diferenca">diferença (A − B)</option>
+        </select>
+      </div>
+      <div className="flex-1 min-w-[8rem]">
+        <label className="mb-1 block text-[11px] text-slate-500">nome (opcional)</label>
+        <input
+          value={nome}
+          onChange={(e) => setNome(e.target.value)}
+          placeholder="gerado automaticamente"
+          className="w-full rounded-md bg-slate-800 border border-slate-600 px-2 py-1 text-xs text-slate-100"
+        />
+      </div>
+      <button
+        onClick={adicionar}
+        disabled={!numerador || !denominador || numerador === denominador}
+        className="rounded-md bg-slate-700 px-3 py-1 text-xs font-medium text-slate-100 transition hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        + Adicionar
+      </button>
+    </div>
+  );
 }
 
 function BarraIVMini({
@@ -52,7 +141,7 @@ function Modulo({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-slate-800/50 bg-slate-900/30 p-5">
+    <div className="flex flex-col gap-4 rounded-xl border border-slate-700 bg-slate-900/70 p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
@@ -71,6 +160,9 @@ function Modulo({
 }
 
 export default function PainelModulos({ dataset }: Props) {
+  const [colunas, setColunas] = useState<string[]>([]);
+  const [paresCustomizados, setParesCustomizados] = useState<ParConstrucao[]>([]);
+
   const [rodandoConstrucao, setRodandoConstrucao] = useState(false);
   const [resultadoConstrucao, setResultadoConstrucao] = useState<ResultadoConstrucao | null>(null);
   const [erroConstrucao, setErroConstrucao] = useState<string | null>(null);
@@ -82,11 +174,21 @@ export default function PainelModulos({ dataset }: Props) {
   );
   const [erroCategorizacao, setErroCategorizacao] = useState<string | null>(null);
 
+  useEffect(() => {
+    buscarPreviewDataset(dataset)
+      .then((p) => setColunas(p.colunas.filter((c) => c !== "y")))
+      .catch(() => setColunas([]));
+  }, [dataset]);
+
+  function removerPar(indice: number) {
+    setParesCustomizados((atual) => atual.filter((_, i) => i !== indice));
+  }
+
   async function aoRodarConstrucao() {
     setRodandoConstrucao(true);
     setErroConstrucao(null);
     try {
-      setResultadoConstrucao(await rodarConstrucao(dataset));
+      setResultadoConstrucao(await rodarConstrucao(dataset, paresCustomizados));
     } catch (e) {
       setErroConstrucao(String(e));
     } finally {
@@ -98,7 +200,9 @@ export default function PainelModulos({ dataset }: Props) {
     setRodandoCategorizacao(true);
     setErroCategorizacao(null);
     try {
-      setResultadoCategorizacao(await rodarCategorizacaoTransformacao(dataset, usarConstrucao));
+      setResultadoCategorizacao(
+        await rodarCategorizacaoTransformacao(dataset, usarConstrucao, paresCustomizados),
+      );
     } catch (e) {
       setErroCategorizacao(String(e));
     } finally {
@@ -112,7 +216,7 @@ export default function PainelModulos({ dataset }: Props) {
     <button
       onClick={aoClicar}
       disabled={rodando}
-      className="shrink-0 rounded-lg bg-slate-800/70 border border-slate-700/50 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-700 hover:text-emerald-400 disabled:opacity-50"
+      className="shrink-0 rounded-lg bg-slate-800 border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-700 hover:text-emerald-400 disabled:opacity-50"
     >
       {rodando ? "Rodando…" : rotulo}
     </button>
@@ -126,9 +230,32 @@ export default function PainelModulos({ dataset }: Props) {
         <Modulo
           numero={1}
           titulo="Construção"
-          descricao="Razões/diferenças de negócio, quando aplicáveis ao dataset."
+          descricao="Razões/diferenças entre colunas — automáticas (se aplicável ao dataset) ou definidas por você abaixo."
           acoes={botao(rodandoConstrucao, () => void aoRodarConstrucao(), "Rodar")}
         >
+          <FormularioParConstrucao
+            colunas={colunas}
+            aoAdicionar={(par) => setParesCustomizados((atual) => [...atual, par])}
+          />
+          {paresCustomizados.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {paresCustomizados.map((par, i) => (
+                <span
+                  key={i}
+                  className="flex items-center gap-1.5 rounded-full border border-slate-600 bg-slate-800 px-2.5 py-1 text-[11px] text-slate-300"
+                >
+                  {rotuloPar(par)}
+                  <button
+                    onClick={() => removerPar(i)}
+                    className="text-slate-500 hover:text-red-400"
+                    aria-label={`Remover ${rotuloPar(par)}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           {erroConstrucao && <p className="text-xs text-red-400">{erroConstrucao}</p>}
           {!resultadoConstrucao && !erroConstrucao && (
             <p className="text-xs text-slate-600">Ainda não rodado.</p>
@@ -136,7 +263,8 @@ export default function PainelModulos({ dataset }: Props) {
           {resultadoConstrucao &&
             (resultadoConstrucao.colunas_novas.length === 0 ? (
               <p className="text-xs text-slate-500">
-                Nenhuma razão de negócio aplicável a este dataset (colunas necessárias ausentes).
+                Nenhuma variável construída — nem sugestão automática aplicável a este dataset, nem par
+                customizado adicionado acima.
               </p>
             ) : (
               <div className="text-xs text-slate-400">

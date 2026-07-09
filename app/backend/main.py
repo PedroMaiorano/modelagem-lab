@@ -30,6 +30,7 @@ from ingestao import (
     valores_distintos,
 )
 from logica import (
+    ParConstrucao,
     listar_datasets,
     preview_dataset,
     rodar_categorizacao_transformacao,
@@ -71,18 +72,46 @@ def rota_preview_dataset(nome: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+class ParConstrucaoAPI(BaseModel):
+    numerador: str
+    denominador: str
+    nome: str | None = None
+    operacao: Literal["razao", "diferenca"] = "razao"
+
+
+def _par_construcao(p: ParConstrucaoAPI) -> ParConstrucao:
+    simbolo = "sobre" if p.operacao == "razao" else "menos"
+    nome = p.nome or f"{p.numerador}_{simbolo}_{p.denominador}"
+    return ParConstrucao(p.numerador, p.denominador, nome, p.operacao)
+
+
+class ConfigConstrucao(BaseModel):
+    dataset: str
+    pares_customizados: list[ParConstrucaoAPI] = []
+
+
 @app.post("/api/modulo/construcao")
-def rota_rodar_construcao(dataset: str) -> dict[str, Any]:
-    if dataset not in listar_datasets():
-        raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' não encontrado")
-    return rodar_construcao(dataset)
+def rota_rodar_construcao(config: ConfigConstrucao) -> dict[str, Any]:
+    if config.dataset not in listar_datasets():
+        raise HTTPException(status_code=404, detail=f"Dataset '{config.dataset}' não encontrado")
+    pares = [_par_construcao(p) for p in config.pares_customizados]
+    return rodar_construcao(config.dataset, pares_customizados=pares)
+
+
+class ConfigCategorizacaoTransformacao(BaseModel):
+    dataset: str
+    usar_construcao: bool = True
+    pares_customizados: list[ParConstrucaoAPI] = []
 
 
 @app.post("/api/modulo/categorizacao-transformacao")
-def rota_rodar_categorizacao_transformacao(dataset: str, usar_construcao: bool = True) -> dict[str, Any]:
-    if dataset not in listar_datasets():
-        raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' não encontrado")
-    return rodar_categorizacao_transformacao(dataset, usar_construcao=usar_construcao)
+def rota_rodar_categorizacao_transformacao(config: ConfigCategorizacaoTransformacao) -> dict[str, Any]:
+    if config.dataset not in listar_datasets():
+        raise HTTPException(status_code=404, detail=f"Dataset '{config.dataset}' não encontrado")
+    pares = [_par_construcao(p) for p in config.pares_customizados]
+    return rodar_categorizacao_transformacao(
+        config.dataset, usar_construcao=config.usar_construcao, pares_customizados=pares
+    )
 
 
 # ---------------------------------------------------------------------------

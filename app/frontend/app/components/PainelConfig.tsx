@@ -10,7 +10,7 @@ interface Props {
 
 function Secao({ titulo, children }: { titulo: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-slate-800/50 bg-slate-900/30 p-5">
+    <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-5">
       <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">{titulo}</h2>
       {children}
     </div>
@@ -100,7 +100,7 @@ export default function PainelConfig({ config, aoMudar, rodando }: Props) {
               value={config.min_vars_para_backward}
               onChange={(e) => atualizar("min_vars_para_backward", Number(e.target.value))}
               disabled={rodando}
-              className="w-24 rounded-lg bg-slate-800/70 border border-slate-700/60 px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="w-24 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
         </div>
@@ -145,7 +145,7 @@ export default function PainelConfig({ config, aoMudar, rodando }: Props) {
                 value={config[campo]}
                 onChange={(e) => atualizar(campo, Number(e.target.value))}
                 disabled={rodando}
-                className="w-full rounded-lg bg-slate-800/70 border border-slate-700/60 px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
           ))}
@@ -175,7 +175,7 @@ export default function PainelConfig({ config, aoMudar, rodando }: Props) {
                 value={config.n_best_backward}
                 onChange={(e) => atualizar("n_best_backward", Number(e.target.value))}
                 disabled={rodando}
-                className="w-full rounded-lg bg-slate-800/70 border border-slate-700/60 px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
             <div>
@@ -187,7 +187,7 @@ export default function PainelConfig({ config, aoMudar, rodando }: Props) {
                 value={config.profundidade_maxima_nivel3}
                 onChange={(e) => atualizar("profundidade_maxima_nivel3", Number(e.target.value))}
                 disabled={rodando}
-                className="w-full rounded-lg bg-slate-800/70 border border-slate-700/60 px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
           </div>

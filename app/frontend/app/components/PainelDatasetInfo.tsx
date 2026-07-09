@@ -9,7 +9,7 @@ interface Props {
 
 function Cartao({ rotulo, valor }: { rotulo: string; valor: string | number }) {
   return (
-    <div className="rounded-xl border border-slate-800/50 bg-slate-900/30 px-4 py-3">
+    <div className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-3">
       <div className="text-[11px] uppercase tracking-wider text-slate-500">{rotulo}</div>
       <div className="mt-1 text-xl font-semibold text-slate-100 tabular-nums">{valor}</div>
     </div>
@@ -58,10 +58,10 @@ export default function PainelDatasetInfo({ dataset }: Props) {
         <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-slate-500">
           Amostra (5 primeiras linhas de dev)
         </h2>
-        <div className="overflow-x-auto rounded-xl border border-slate-800/50 bg-slate-900/30">
+        <div className="overflow-x-auto rounded-xl border border-slate-700 bg-slate-900/70">
           <table className="min-w-full text-left text-xs">
             <thead>
-              <tr className="border-b border-slate-800/50 text-slate-500">
+              <tr className="border-b border-slate-700 text-slate-500">
                 {preview.colunas.map((c) => (
                   <th key={c} className="whitespace-nowrap px-3 py-2 font-medium">
                     {c}
@@ -71,7 +71,7 @@ export default function PainelDatasetInfo({ dataset }: Props) {
             </thead>
             <tbody>
               {preview.amostra.map((linha, i) => (
-                <tr key={i} className="border-b border-slate-800/30 last:border-0">
+                <tr key={i} className="border-b border-slate-800 last:border-0">
                   {preview.colunas.map((c) => (
                     <td key={c} className="whitespace-nowrap px-3 py-1.5 text-slate-300">
                       {String(linha[c])}

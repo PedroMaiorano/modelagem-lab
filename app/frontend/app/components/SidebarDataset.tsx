@@ -24,13 +24,13 @@ export default function SidebarDataset({
   painelUpload,
 }: Props) {
   return (
-    <aside className="w-64 shrink-0 border-r border-slate-800/60 bg-slate-900/30 p-5 flex flex-col gap-5 overflow-y-auto">
+    <aside className="w-64 shrink-0 border-r border-slate-700 bg-slate-900/70 p-5 flex flex-col gap-5 overflow-y-auto">
       {painelUpload}
 
       <div>
         <h2 className="text-xs font-medium uppercase tracking-wider text-slate-500 mb-2">Dataset</h2>
         <select
-          className="w-full rounded-lg bg-slate-800/70 border border-slate-700/60 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          className="w-full rounded-lg bg-slate-800 border border-slate-600 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
           value={dataset}
           onChange={(e) => aoMudarDataset(e.target.value)}
           disabled={rodando}
@@ -58,7 +58,7 @@ export default function SidebarDataset({
           <button
             onClick={aoLimpar}
             disabled={rodando}
-            className="w-full rounded-lg border border-slate-700/60 px-4 py-2 text-xs font-medium text-slate-400 transition hover:border-slate-600 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+            className="w-full rounded-lg border border-slate-600 px-4 py-2 text-xs font-medium text-slate-400 transition hover:border-slate-600 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Limpar resultado
           </button>

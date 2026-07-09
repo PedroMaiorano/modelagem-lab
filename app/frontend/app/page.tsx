@@ -135,13 +135,13 @@ export default function Pagina() {
               Construção → categorização → transformação → treinamento, em tempo real.
             </p>
           </div>
-          <div className="flex items-center gap-1.5 rounded-full border border-slate-800/60 px-2.5 py-1 text-[11px] text-slate-500">
+          <div className="flex items-center gap-1.5 rounded-full border border-slate-700 px-2.5 py-1 text-[11px] text-slate-500">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
             backend conectado
           </div>
         </header>
 
-        <nav className="mb-6 flex gap-1 rounded-lg bg-slate-900/40 p-1 w-fit">
+        <nav className="mb-6 flex gap-1 rounded-lg bg-slate-900/70 p-1 w-fit">
           {ABAS.map((a) => (
             <button
               key={a.id}

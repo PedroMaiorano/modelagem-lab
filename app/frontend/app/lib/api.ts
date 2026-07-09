@@ -116,9 +116,21 @@ export interface ResultadoCategorizacaoTransformacao {
   iv: ItemIVDetalhado[];
 }
 
-export async function rodarConstrucao(dataset: string): Promise<ResultadoConstrucao> {
-  const resp = await fetch(`${URL_API}/api/modulo/construcao?${new URLSearchParams({ dataset })}`, {
+export interface ParConstrucao {
+  numerador: string;
+  denominador: string;
+  nome?: string;
+  operacao: "razao" | "diferenca";
+}
+
+export async function rodarConstrucao(
+  dataset: string,
+  paresCustomizados: ParConstrucao[] = [],
+): Promise<ResultadoConstrucao> {
+  const resp = await fetch(`${URL_API}/api/modulo/construcao`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dataset, pares_customizados: paresCustomizados }),
   });
   if (!resp.ok) throw new Error(`Falha ao rodar construção (${resp.status})`);
   return resp.json();
@@ -127,10 +139,16 @@ export async function rodarConstrucao(dataset: string): Promise<ResultadoConstru
 export async function rodarCategorizacaoTransformacao(
   dataset: string,
   usarConstrucao: boolean,
+  paresCustomizados: ParConstrucao[] = [],
 ): Promise<ResultadoCategorizacaoTransformacao> {
-  const params = new URLSearchParams({ dataset, usar_construcao: String(usarConstrucao) });
-  const resp = await fetch(`${URL_API}/api/modulo/categorizacao-transformacao?${params}`, {
+  const resp = await fetch(`${URL_API}/api/modulo/categorizacao-transformacao`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dataset,
+      usar_construcao: usarConstrucao,
+      pares_customizados: paresCustomizados,
+    }),
   });
   if (!resp.ok) throw new Error(`Falha ao rodar categorização + transformação (${resp.status})`);
   return resp.json();
