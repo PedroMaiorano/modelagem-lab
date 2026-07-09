@@ -4,7 +4,7 @@ import type { EventoResultado } from "../lib/api";
 
 function Metrica({ rotulo, valor }: { rotulo: string; valor: string }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-3">
+    <div className="rounded-xl border border-slate-800/50 bg-slate-900/30 px-4 py-3">
       <div className="text-[11px] uppercase tracking-wider text-slate-500">{rotulo}</div>
       <div className="mt-1 text-2xl font-semibold text-slate-100 tabular-nums">{valor}</div>
     </div>
@@ -61,7 +61,7 @@ export default function PainelResultado({ resultado }: { resultado: EventoResult
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Top Information Value
           </h3>
-          <div className="flex flex-col gap-2 rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+          <div className="flex flex-col gap-2 rounded-xl border border-slate-800/50 bg-slate-900/30 p-4">
             {resultado.top_iv.map((item) => (
               <BarraIV key={item.variavel} variavel={item.variavel} iv={item.iv} maximo={maximoIV} />
             ))}

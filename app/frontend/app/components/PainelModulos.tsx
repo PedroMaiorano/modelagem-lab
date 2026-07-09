@@ -19,7 +19,7 @@ function BarraIVMini({ variavel, iv, classificacao, maximo }: { variavel: string
       <div className="w-36 shrink-0 truncate text-slate-400" title={variavel}>
         {variavel}
       </div>
-      <div className="h-3.5 flex-1 overflow-hidden rounded bg-slate-800">
+      <div className="h-3 flex-1 overflow-hidden rounded-full bg-slate-800/50">
         <div className="h-full rounded bg-sky-600" style={{ width: `${largura}%` }} />
       </div>
       <div className="w-16 shrink-0 text-right tabular-nums text-slate-400">{iv.toFixed(3)}</div>
@@ -42,10 +42,10 @@ function Etapa({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/50">
+    <div className="rounded-xl border border-slate-800/50 bg-slate-900/30">
       <button
         onClick={aoAlternar}
-        className="flex w-full items-center justify-between px-4 py-3 text-left"
+        className="flex w-full items-center justify-between px-5 py-4 text-left"
       >
         <div>
           <h3 className="text-sm font-semibold text-slate-100">{titulo}</h3>
@@ -53,7 +53,7 @@ function Etapa({
         </div>
         <span className="text-slate-500 text-xs">{aberta ? "▾" : "▸"}</span>
       </button>
-      {aberta && <div className="border-t border-slate-800 p-4">{children}</div>}
+      {aberta && <div className="border-t border-slate-800/50 p-5">{children}</div>}
     </div>
   );
 }
@@ -100,10 +100,10 @@ export default function PainelModulos({ dataset }: Props) {
   const maximoIV = Math.max(0, ...(resultadoCategorizacao?.iv.map((i) => i.iv) ?? []));
 
   return (
-    <div className="flex flex-col gap-3">
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-        Módulos (inspeção isolada, antes do treinamento)
-      </h2>
+    <div className="flex flex-col gap-4 max-w-3xl">
+      <p className="text-sm text-slate-500">
+        Rode e inspecione cada etapa isoladamente antes do treinamento.
+      </p>
 
       <Etapa
         titulo="1. Construção"
@@ -114,7 +114,7 @@ export default function PainelModulos({ dataset }: Props) {
         <button
           onClick={() => void aoRodarConstrucao()}
           disabled={rodandoConstrucao}
-          className="rounded-md bg-slate-800 border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-700 hover:text-emerald-400 disabled:opacity-50"
+          className="rounded-lg bg-slate-800/60 border border-slate-700/50 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-700 hover:text-emerald-400 disabled:opacity-50"
         >
           {rodandoConstrucao ? "Rodando…" : "Rodar construção"}
         </button>
@@ -163,7 +163,7 @@ export default function PainelModulos({ dataset }: Props) {
         <button
           onClick={() => void aoRodarCategorizacao()}
           disabled={rodandoCategorizacao}
-          className="rounded-md bg-slate-800 border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-700 hover:text-emerald-400 disabled:opacity-50"
+          className="rounded-lg bg-slate-800/60 border border-slate-700/50 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-700 hover:text-emerald-400 disabled:opacity-50"
         >
           {rodandoCategorizacao ? "Rodando…" : "Rodar categorização + transformação"}
         </button>
@@ -181,7 +181,8 @@ export default function PainelModulos({ dataset }: Props) {
       </Etapa>
 
       <p className="text-xs text-slate-600">
-        3. Treinamento (Pedro_Wise) — configure na barra lateral e rode em &ldquo;Rodar seleção&rdquo;.
+        3. Treinamento (Pedro_Wise) — configure na aba &ldquo;Treinamento&rdquo; e rode em &ldquo;Rodar
+        seleção&rdquo; na barra lateral.
       </p>
     </div>
   );

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import PainelConfig from "./components/PainelConfig";
 import PainelModulos from "./components/PainelModulos";
 import PainelUpload from "./components/PainelUpload";
+import SidebarDataset from "./components/SidebarDataset";
 import ProgressoAoVivo, { type LinhaProgresso } from "./components/ProgressoAoVivo";
 import PainelResultado from "./components/PainelResultado";
 import {
@@ -34,9 +35,18 @@ const CONFIG_INICIAL: ConfigPipeline = {
   profundidade_maxima_nivel3: 2,
 };
 
+const ABAS = [
+  { id: "dataset", rotulo: "Dataset" },
+  { id: "modulos", rotulo: "Módulos" },
+  { id: "treinamento", rotulo: "Treinamento" },
+] as const;
+
+type Aba = (typeof ABAS)[number]["id"];
+
 export default function Pagina() {
   const [datasets, setDatasets] = useState<string[]>([]);
   const [config, setConfig] = useState<ConfigPipeline>(CONFIG_INICIAL);
+  const [aba, setAba] = useState<Aba>("dataset");
   const [rodando, setRodando] = useState(false);
   const [linhas, setLinhas] = useState<LinhaProgresso[]>([]);
   const [resultado, setResultado] = useState<EventoResultado | null>(null);
@@ -51,16 +61,27 @@ export default function Pagina() {
       .catch((e) => setErroCarregamento(String(e)));
   }, []);
 
+  function limparResultado() {
+    setLinhas([]);
+    setResultado(null);
+  }
+
+  function aoMudarDataset(dataset: string) {
+    setConfig((c) => ({ ...c, dataset }));
+    limparResultado();
+  }
+
   async function aoPrepararNovoDataset(nomeDataset: string) {
     const lista = await buscarDatasets();
     setDatasets(lista);
-    setConfig((c) => ({ ...c, dataset: nomeDataset }));
+    aoMudarDataset(nomeDataset);
+    setAba("modulos");
   }
 
   async function aoRodar() {
+    setAba("treinamento");
     setRodando(true);
-    setLinhas([]);
-    setResultado(null);
+    limparResultado();
     try {
       await rodarPipelineComProgresso(config, (evento) => {
         if (evento.tipo === "resultado") {
@@ -95,33 +116,75 @@ export default function Pagina() {
 
   return (
     <div className="flex h-screen">
-      <PainelConfig
+      <SidebarDataset
         datasets={datasets}
-        config={config}
-        aoMudar={setConfig}
+        dataset={config.dataset}
+        aoMudarDataset={aoMudarDataset}
         rodando={rodando}
         aoRodar={aoRodar}
+        aoLimpar={limparResultado}
+        temResultado={linhas.length > 0 || resultado !== null}
         painelUpload={<PainelUpload aoPreparar={aoPrepararNovoDataset} />}
       />
       <main className="flex-1 overflow-y-auto p-6">
-        <header className="mb-6 flex items-center justify-between border-b border-slate-800 pb-4">
+        <header className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-lg font-semibold text-slate-100">Pedro_Wise — dashboard</h1>
             <p className="text-sm text-slate-500">
               Construção → categorização → transformação → treinamento, em tempo real.
             </p>
           </div>
-          <div className="flex items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/50 px-2.5 py-1 text-[11px] text-slate-500">
+          <div className="flex items-center gap-1.5 rounded-full border border-slate-800/60 px-2.5 py-1 text-[11px] text-slate-500">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
             backend conectado
           </div>
         </header>
 
-        <div className="flex flex-col gap-6">
-          {config.dataset && <PainelModulos dataset={config.dataset} />}
-          <ProgressoAoVivo linhas={linhas} rodando={rodando} />
-          {resultado && <PainelResultado resultado={resultado} />}
-        </div>
+        <nav className="mb-6 flex gap-1 border-b border-slate-800/60">
+          {ABAS.map((a) => (
+            <button
+              key={a.id}
+              onClick={() => setAba(a.id)}
+              className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
+                aba === a.id
+                  ? "border-emerald-500 text-slate-100"
+                  : "border-transparent text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              {a.rotulo}
+            </button>
+          ))}
+        </nav>
+
+        {aba === "dataset" && (
+          <div className="max-w-lg">
+            <p className="text-sm text-slate-500">
+              Dataset ativo: <span className="text-slate-200">{config.dataset || "nenhum selecionado"}</span>
+            </p>
+            <p className="mt-1 text-xs text-slate-600">
+              Use &ldquo;+ Novo dataset&rdquo; na barra lateral pra enviar um CSV novo, ou escolha um já
+              preparado no seletor. Depois vá pra aba &ldquo;Módulos&rdquo; pra inspecionar construção e
+              categorização, ou direto pra &ldquo;Treinamento&rdquo;.
+            </p>
+          </div>
+        )}
+
+        {aba === "modulos" &&
+          (config.dataset ? (
+            <PainelModulos key={config.dataset} dataset={config.dataset} />
+          ) : (
+            <p className="text-sm text-slate-600">Selecione um dataset primeiro.</p>
+          ))}
+
+        {aba === "treinamento" && (
+          <div className="flex flex-col gap-8">
+            <PainelConfig config={config} aoMudar={setConfig} rodando={rodando} />
+            <div className="flex flex-col gap-6">
+              <ProgressoAoVivo linhas={linhas} rodando={rodando} />
+              {resultado && <PainelResultado resultado={resultado} />}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
