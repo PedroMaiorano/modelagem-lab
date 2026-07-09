@@ -5,9 +5,11 @@ import {
   buscarPreviewDataset,
   rodarCategorizacaoTransformacao,
   rodarConstrucao,
+  rodarPreSelecao,
   type ParConstrucao,
   type ResultadoCategorizacaoTransformacao,
   type ResultadoConstrucao,
+  type ResultadoPreSelecao,
 } from "../lib/api";
 
 interface Props {
@@ -19,12 +21,14 @@ function rotuloPar(p: ParConstrucao): string {
   return p.nome || `${p.numerador} ${simbolo} ${p.denominador}`;
 }
 
-const MAXIMO_COLUNAS_PARA_AUTO_GERAR = 12;
+const AVISO_MUITAS_COLUNAS = 20;
 
 /** Todas as razões possíveis entre pares de colunas NUMÉRICAS (nunca
  * categóricas/data, senão a divisão quebra) — cada par uma vez só (A/B, não
- * A/B e B/A). Capado em `MAXIMO_COLUNAS_PARA_AUTO_GERAR` colunas pra não
- * explodir o número de candidatas que o Pedro_Wise depois precisa avaliar.
+ * A/B e B/A). Sem limite — o volume de candidatas geradas pode ficar grande
+ * (C(n,2) pares × ~7 transformações de potência cada), mas isso é
+ * exatamente o que o módulo 3 (Pré-seleção) existe pra filtrar depois, em
+ * vez de restringir aqui na origem.
  */
 function gerarTodasCombinacoes(colunasNumericas: string[]): ParConstrucao[] {
   const pares: ParConstrucao[] = [];
@@ -118,6 +122,43 @@ function FormularioParConstrucao({
   );
 }
 
+/** Campo numérico opcional compacto: desmarcado = filtro desligado (`null`). */
+function CampoLimiar({
+  rotulo,
+  valor,
+  aoMudar,
+  passo,
+}: {
+  rotulo: string;
+  valor: number | null;
+  aoMudar: (v: number | null) => void;
+  passo: number;
+}) {
+  const ativo = valor !== null;
+  return (
+    <div>
+      <label className="mb-1 flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={ativo}
+          onChange={(e) => aoMudar(e.target.checked ? passo * 10 : null)}
+          className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500"
+        />
+        {rotulo}
+      </label>
+      <input
+        type="number"
+        step={passo}
+        min={0}
+        value={valor ?? ""}
+        disabled={!ativo}
+        onChange={(e) => aoMudar(Number(e.target.value))}
+        className="w-full rounded-md bg-slate-800 border border-slate-600 px-2 py-1 text-xs text-slate-100 disabled:opacity-40"
+      />
+    </div>
+  );
+}
+
 function BarraIVMini({
   variavel,
   iv,
@@ -186,11 +227,19 @@ export default function PainelModulos({ dataset }: Props) {
 
   const [usarConstrucao, setUsarConstrucao] = useState(true);
   const [gerarTransformacoesPotencia, setGerarTransformacoesPotencia] = useState(true);
+  const [gerarBinOrdinal, setGerarBinOrdinal] = useState(true);
   const [rodandoCategorizacao, setRodandoCategorizacao] = useState(false);
   const [resultadoCategorizacao, setResultadoCategorizacao] = useState<ResultadoCategorizacaoTransformacao | null>(
     null,
   );
   const [erroCategorizacao, setErroCategorizacao] = useState<string | null>(null);
+
+  const [limiarVariancia, setLimiarVariancia] = useState<number | null>(1e-6);
+  const [limiarIV, setLimiarIV] = useState<number | null>(0.02);
+  const [limiarCorrelacao, setLimiarCorrelacao] = useState<number | null>(0.9);
+  const [rodandoPreSelecao, setRodandoPreSelecao] = useState(false);
+  const [resultadoPreSelecao, setResultadoPreSelecao] = useState<ResultadoPreSelecao | null>(null);
+  const [erroPreSelecao, setErroPreSelecao] = useState<string | null>(null);
 
   useEffect(() => {
     buscarPreviewDataset(dataset)
@@ -228,12 +277,36 @@ export default function PainelModulos({ dataset }: Props) {
           usarConstrucao,
           paresCustomizados,
           gerarTransformacoesPotencia,
+          gerarBinOrdinal,
         ),
       );
     } catch (e) {
       setErroCategorizacao(String(e));
     } finally {
       setRodandoCategorizacao(false);
+    }
+  }
+
+  async function aoRodarPreSelecao() {
+    setRodandoPreSelecao(true);
+    setErroPreSelecao(null);
+    try {
+      setResultadoPreSelecao(
+        await rodarPreSelecao({
+          dataset,
+          usar_construcao: usarConstrucao,
+          pares_customizados: paresCustomizados,
+          gerar_transformacoes_potencia: gerarTransformacoesPotencia,
+          gerar_bin_ordinal: gerarBinOrdinal,
+          limiar_variancia: limiarVariancia,
+          limiar_iv: limiarIV,
+          limiar_correlacao: limiarCorrelacao,
+        }),
+      );
+    } catch (e) {
+      setErroPreSelecao(String(e));
+    } finally {
+      setRodandoPreSelecao(false);
     }
   }
 
@@ -267,15 +340,16 @@ export default function PainelModulos({ dataset }: Props) {
           <div className="flex items-center gap-2">
             <button
               onClick={aoGerarAutomaticamente}
-              disabled={colunasNumericas.length < 2 || colunasNumericas.length > MAXIMO_COLUNAS_PARA_AUTO_GERAR}
+              disabled={colunasNumericas.length < 2}
               className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-700 hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Gerar automaticamente (todas as razões entre colunas numéricas)
             </button>
-            {colunasNumericas.length > MAXIMO_COLUNAS_PARA_AUTO_GERAR && (
-              <span className="text-[11px] text-slate-600">
-                {colunasNumericas.length} colunas numéricas — acima do limite de{" "}
-                {MAXIMO_COLUNAS_PARA_AUTO_GERAR} pra gerar tudo de uma vez, monte manualmente acima.
+            {colunasNumericas.length > AVISO_MUITAS_COLUNAS && (
+              <span className="text-[11px] text-amber-500">
+                {colunasNumericas.length} colunas numéricas → até{" "}
+                {(colunasNumericas.length * (colunasNumericas.length - 1)) / 2} razões. Use a Pré-seleção
+                (módulo 3) depois pra filtrar antes do treinamento.
               </span>
             )}
           </div>
@@ -352,6 +426,15 @@ export default function PainelModulos({ dataset }: Props) {
             />
             gerar log/raiz/quadrática/cúbica/inversas por variável numérica
           </label>
+          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={gerarBinOrdinal}
+              onChange={(e) => setGerarBinOrdinal(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500"
+            />
+            gerar índice do bin (faixa) como candidata
+          </label>
           {erroCategorizacao && <p className="text-xs text-red-400">{erroCategorizacao}</p>}
           {!resultadoCategorizacao && !erroCategorizacao && (
             <p className="text-xs text-slate-600">Ainda não rodado.</p>
@@ -369,9 +452,64 @@ export default function PainelModulos({ dataset }: Props) {
         </Modulo>
       </div>
 
+      <Modulo
+        numero={3}
+        titulo="Pré-seleção"
+        descricao="Reduz o volume de candidatas antes do treinamento: variância, IV (por variável-base) e correlação entre bases diferentes."
+        acoes={botao(rodandoPreSelecao, () => void aoRodarPreSelecao(), "Rodar")}
+      >
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <CampoLimiar rotulo="variância mín." valor={limiarVariancia} aoMudar={setLimiarVariancia} passo={0.000001} />
+          <CampoLimiar rotulo="IV mín." valor={limiarIV} aoMudar={setLimiarIV} passo={0.01} />
+          <CampoLimiar rotulo="correlação máx." valor={limiarCorrelacao} aoMudar={setLimiarCorrelacao} passo={0.05} />
+        </div>
+        {erroPreSelecao && <p className="text-xs text-red-400">{erroPreSelecao}</p>}
+        {!resultadoPreSelecao && !erroPreSelecao && <p className="text-xs text-slate-600">Ainda não rodado.</p>}
+        {resultadoPreSelecao && (
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+              <span className="tabular-nums">{resultadoPreSelecao.n_inicial}</span>
+              <span>→ variância →</span>
+              <span className="tabular-nums">{resultadoPreSelecao.n_apos_variancia}</span>
+              <span>→ IV →</span>
+              <span className="tabular-nums">{resultadoPreSelecao.n_apos_iv}</span>
+              <span>→ correlação →</span>
+              <span className="font-semibold text-emerald-400 tabular-nums">{resultadoPreSelecao.n_final}</span>
+            </div>
+            {resultadoPreSelecao.pares_correlacionados_descartados.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-[11px] text-slate-500">
+                  Pares correlacionados (manteve a de maior IV):
+                </p>
+                <div className="flex flex-col gap-1 text-[11px] text-slate-400">
+                  {resultadoPreSelecao.pares_correlacionados_descartados.map((p, i) => (
+                    <div key={i}>
+                      <span className="text-emerald-400">{p.mantida}</span> em vez de{" "}
+                      <span className="text-slate-500 line-through">{p.descartada}</span> (r=
+                      {p.correlacao.toFixed(2)})
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto pr-1">
+              {resultadoPreSelecao.colunas_mantidas.map((c) => (
+                <span
+                  key={c}
+                  className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-[11px] text-emerald-300"
+                >
+                  {c}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </Modulo>
+
       <p className="text-xs text-slate-600">
-        3. Treinamento (Pedro_Wise) — configure na aba &ldquo;Treinamento&rdquo; e rode em &ldquo;Rodar
-        seleção&rdquo; na barra lateral.
+        4. Treinamento (Pedro_Wise) — configure na aba &ldquo;Treinamento&rdquo; e rode em &ldquo;Rodar
+        seleção&rdquo; na barra lateral. Lá você também pode ativar a pré-seleção pra ela entrar
+        automaticamente antes do treinamento, sem precisar rodar aqui primeiro.
       </p>
     </div>
   );

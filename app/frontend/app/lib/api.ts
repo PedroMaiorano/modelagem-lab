@@ -25,6 +25,14 @@ export interface ConfigPipeline {
   n_best_backward: number;
   profundidade_maxima_nivel3: number;
   gerar_transformacoes_potencia: boolean;
+  gerar_bin_ordinal: boolean;
+  // Pré-seleção (módulo 3) — opt-in
+  usar_pre_selecao: boolean;
+  limiar_variancia: number | null;
+  limiar_iv: number | null;
+  limiar_correlacao: number | null;
+  // Restrição de significância — null desliga
+  p_valor_maximo: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +150,7 @@ export async function rodarCategorizacaoTransformacao(
   usarConstrucao: boolean,
   paresCustomizados: ParConstrucao[] = [],
   gerarTransformacoesPotencia: boolean = true,
+  gerarBinOrdinal: boolean = true,
 ): Promise<ResultadoCategorizacaoTransformacao> {
   const resp = await fetch(`${URL_API}/api/modulo/categorizacao-transformacao`, {
     method: "POST",
@@ -151,9 +160,46 @@ export async function rodarCategorizacaoTransformacao(
       usar_construcao: usarConstrucao,
       pares_customizados: paresCustomizados,
       gerar_transformacoes_potencia: gerarTransformacoesPotencia,
+      gerar_bin_ordinal: gerarBinOrdinal,
     }),
   });
   if (!resp.ok) throw new Error(`Falha ao rodar categorização + transformação (${resp.status})`);
+  return resp.json();
+}
+
+export interface ConfigPreSelecao {
+  dataset: string;
+  usar_construcao: boolean;
+  pares_customizados: ParConstrucao[];
+  gerar_transformacoes_potencia: boolean;
+  gerar_bin_ordinal: boolean;
+  limiar_variancia: number | null;
+  limiar_iv: number | null;
+  limiar_correlacao: number | null;
+}
+
+export interface ParCorrelacionado {
+  mantida: string;
+  descartada: string;
+  correlacao: number;
+}
+
+export interface ResultadoPreSelecao {
+  n_inicial: number;
+  n_apos_variancia: number;
+  n_apos_iv: number;
+  n_final: number;
+  colunas_mantidas: string[];
+  pares_correlacionados_descartados: ParCorrelacionado[];
+}
+
+export async function rodarPreSelecao(config: ConfigPreSelecao): Promise<ResultadoPreSelecao> {
+  const resp = await fetch(`${URL_API}/api/modulo/pre-selecao`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!resp.ok) throw new Error(`Falha ao rodar pré-seleção (${resp.status})`);
   return resp.json();
 }
 
@@ -208,6 +254,12 @@ export interface Coeficiente {
   p_valor: number;
 }
 
+export interface ResultadoSemFiltroPValor {
+  variaveis: string[];
+  ks_teste: number;
+  auc: number;
+}
+
 export interface EventoResultado {
   tipo: "resultado";
   variaveis: string[];
@@ -224,6 +276,7 @@ export interface EventoResultado {
   intercepto_erro_padrao: number;
   intercepto_p_valor: number;
   coeficientes: Coeficiente[];
+  resultado_sem_filtro_pvalor: ResultadoSemFiltroPValor | null;
   tempo_segundos: number;
 }
 
@@ -235,11 +288,32 @@ export async function buscarDatasets(): Promise<string[]> {
   return resp.json();
 }
 
+export interface ResumoColunaNumerica {
+  tipo: "numerico";
+  pct_ausente: number;
+  minimo: number;
+  maximo: number;
+  media: number;
+  desvio_padrao: number;
+}
+
+export interface ResumoColunaCategorica {
+  tipo: "categorico";
+  pct_ausente: number;
+  n_distintos: number;
+  top_valores: { valor: string; contagem: number }[];
+}
+
+export type ResumoColuna = ResumoColunaNumerica | ResumoColunaCategorica;
+
 export interface PreviewDataset {
   colunas: string[];
   colunas_numericas: string[];
   n_dev: number;
   n_teste: number;
+  taxa_evento_dev: number | null;
+  taxa_evento_teste: number | null;
+  resumo_colunas: Record<string, ResumoColuna>;
   amostra: Record<string, unknown>[];
 }
 

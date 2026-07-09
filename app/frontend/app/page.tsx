@@ -38,6 +38,12 @@ const CONFIG_INICIAL: ConfigPipeline = {
   n_best_backward: 2,
   profundidade_maxima_nivel3: 2,
   gerar_transformacoes_potencia: true,
+  gerar_bin_ordinal: true,
+  usar_pre_selecao: false,
+  limiar_variancia: 1e-6,
+  limiar_iv: 0.02,
+  limiar_correlacao: 0.9,
+  p_valor_maximo: null,
 };
 
 const ABAS = [
@@ -199,7 +205,7 @@ export default function Pagina() {
         <div className={aba === "treinamento" ? "" : "hidden"}>
           <div className="flex flex-col gap-8">
             <PainelConfig config={config} aoMudar={setConfig} rodando={rodando} />
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_22rem]">
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,42rem)_1fr]">
               <ProgressoAoVivo linhas={linhas} rodando={rodando} />
               {(linhas.length > 0 || rodando) && (
                 <div className="flex flex-col gap-6">

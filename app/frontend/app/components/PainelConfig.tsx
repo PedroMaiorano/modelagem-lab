@@ -17,6 +17,55 @@ function Secao({ titulo, children }: { titulo: string; children: React.ReactNode
   );
 }
 
+/** Campo numérico opcional: vazio/desmarcado = `null` (filtro desligado),
+ * marcado = número ativo. Usado pros limiares de pré-seleção e pro p-valor
+ * máximo — todos seguem a mesma semântica "liga com um valor, ou desliga". */
+function CampoLimiarOpcional({
+  rotulo,
+  descricao,
+  valor,
+  aoMudar,
+  padrao,
+  passo,
+  disabled,
+}: {
+  rotulo: string;
+  descricao?: string;
+  valor: number | null;
+  aoMudar: (v: number | null) => void;
+  padrao: number;
+  passo?: number;
+  disabled: boolean;
+}) {
+  const ativo = valor !== null;
+  return (
+    <div>
+      <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={ativo}
+          onChange={(e) => aoMudar(e.target.checked ? padrao : null)}
+          disabled={disabled}
+          className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+        />
+        {rotulo}
+      </label>
+      {descricao && <p className="mt-0.5 text-xs text-slate-500">{descricao}</p>}
+      {ativo && (
+        <input
+          type="number"
+          step={passo ?? 0.01}
+          min={0}
+          value={valor}
+          onChange={(e) => aoMudar(Number(e.target.value))}
+          disabled={disabled}
+          className="mt-1.5 w-28 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        />
+      )}
+    </div>
+  );
+}
+
 export default function PainelConfig({ config, aoMudar, rodando }: Props) {
   function atualizar<K extends keyof ConfigPipeline>(campo: K, valor: ConfigPipeline[K]) {
     aoMudar({ ...config, [campo]: valor });
@@ -51,6 +100,21 @@ export default function PainelConfig({ config, aoMudar, rodando }: Props) {
         </label>
         <p className="mt-1 text-xs text-slate-500">
           Candidatas extras pra transformação simples trocar pela versão WOE, quando melhora o score.
+        </p>
+
+        <label className="mt-3 flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={config.gerar_bin_ordinal}
+            onChange={(e) => atualizar("gerar_bin_ordinal", e.target.checked)}
+            disabled={rodando || !config.usar_pipeline_completo}
+            className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+          />
+          índice do bin (faixa) como candidata
+        </label>
+        <p className="mt-1 text-xs text-slate-500">
+          Versão mais &ldquo;clássica&rdquo;/explicável (faixa em vez de WOE) — mesmo mecanismo de troca
+          simples.
         </p>
 
         <div className="mt-4">
@@ -206,6 +270,64 @@ export default function PainelConfig({ config, aoMudar, rodando }: Props) {
             </div>
           </div>
         )}
+      </Secao>
+
+      <Secao titulo="Pré-seleção (módulo 3)">
+        <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={config.usar_pre_selecao}
+            onChange={(e) => atualizar("usar_pre_selecao", e.target.checked)}
+            disabled={rodando || !config.usar_pipeline_completo}
+            className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+          />
+          Reduzir candidatas antes do treinamento
+        </label>
+        <p className="mt-1 mb-3 text-xs text-slate-500">
+          Aplica os filtros abaixo em sequência — cada um opcional. Ver aba Módulos pra inspecionar o funil
+          antes de rodar tudo.
+        </p>
+        <div className={`flex flex-col gap-3 ${config.usar_pre_selecao ? "" : "opacity-40"}`}>
+          <CampoLimiarOpcional
+            rotulo="variância mínima"
+            descricao="descarta colunas quase constantes"
+            valor={config.limiar_variancia}
+            aoMudar={(v) => atualizar("limiar_variancia", v)}
+            padrao={1e-6}
+            passo={0.000001}
+            disabled={rodando || !config.usar_pre_selecao}
+          />
+          <CampoLimiarOpcional
+            rotulo="IV mínimo"
+            descricao="descarta a variável-base inteira (todas as versões) abaixo disto"
+            valor={config.limiar_iv}
+            aoMudar={(v) => atualizar("limiar_iv", v)}
+            padrao={0.02}
+            passo={0.01}
+            disabled={rodando || !config.usar_pre_selecao}
+          />
+          <CampoLimiarOpcional
+            rotulo="correlação máxima entre bases"
+            descricao="entre pares muito correlacionados (bases diferentes), mantém o de maior IV"
+            valor={config.limiar_correlacao}
+            aoMudar={(v) => atualizar("limiar_correlacao", v)}
+            padrao={0.9}
+            passo={0.05}
+            disabled={rodando || !config.usar_pre_selecao}
+          />
+        </div>
+      </Secao>
+
+      <Secao titulo="Significância">
+        <CampoLimiarOpcional
+          rotulo="p-valor máximo"
+          descricao='Restrição, não objetivo — o KS continua mandando. Uma variável só entra se o p-valor do coeficiente ficar dentro do limite; nunca bloqueia remoção (backward). Reavaliado a cada rodada, então pode entrar mais tarde se deixar de ser significativa agora.'
+          valor={config.p_valor_maximo}
+          aoMudar={(v) => atualizar("p_valor_maximo", v)}
+          padrao={0.05}
+          passo={0.01}
+          disabled={rodando}
+        />
       </Secao>
     </div>
   );

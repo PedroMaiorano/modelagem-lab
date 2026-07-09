@@ -216,6 +216,76 @@ function marcadorSignificancia(p: number): string {
   return "";
 }
 
+/** Comparação com/sem o filtro de p-valor — só aparece quando o filtro
+ * estava ativo neste run. O backend roda a busca DE NOVO sem a restrição
+ * só pra isso, pedido explícito do usuário ("guardar uma cópia sem o
+ * p-valor") pra ver o que a restrição custou em KS. */
+function ComparacaoSignificancia({ resultado }: { resultado: EventoResultado }) {
+  const semFiltro = resultado.resultado_sem_filtro_pvalor;
+  if (!semFiltro) return null;
+
+  const variaveisRemovidas = semFiltro.variaveis.filter((v) => !resultado.variaveis.includes(v));
+  const deltaKS = resultado.ks_teste - semFiltro.ks_teste;
+
+  return (
+    <div className="rounded-xl border border-amber-800/60 bg-amber-950/20 p-4">
+      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-amber-400">
+        Comparação: com vs. sem restrição de p-valor
+      </h3>
+      <p className="mb-3 text-[11px] text-slate-500">
+        Modelo ao lado é o oficial (com a restrição). Este é só uma referência de quanto KS a restrição
+        custou — rodado sem o filtro, tudo mais igual.
+      </p>
+      <div className="grid grid-cols-2 gap-4 text-xs sm:grid-cols-4">
+        <div>
+          <div className="text-slate-500">KS teste (com filtro)</div>
+          <div className="mt-0.5 text-base font-semibold tabular-nums text-slate-100">
+            {resultado.ks_teste.toFixed(4)}
+          </div>
+        </div>
+        <div>
+          <div className="text-slate-500">KS teste (sem filtro)</div>
+          <div className="mt-0.5 text-base font-semibold tabular-nums text-slate-100">
+            {semFiltro.ks_teste.toFixed(4)}
+          </div>
+        </div>
+        <div>
+          <div className="text-slate-500">diferença</div>
+          <div
+            className={`mt-0.5 text-base font-semibold tabular-nums ${deltaKS < 0 ? "text-rose-400" : "text-emerald-400"}`}
+          >
+            {deltaKS >= 0 ? "+" : ""}
+            {deltaKS.toFixed(4)}
+          </div>
+        </div>
+        <div>
+          <div className="text-slate-500">variáveis (sem filtro)</div>
+          <div className="mt-0.5 text-base font-semibold tabular-nums text-slate-100">
+            {semFiltro.variaveis.length}
+          </div>
+        </div>
+      </div>
+      {variaveisRemovidas.length > 0 && (
+        <div className="mt-3">
+          <p className="mb-1.5 text-[11px] text-slate-500">
+            Entrariam sem a restrição, mas foram bloqueadas por p-valor:
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {variaveisRemovidas.map((v) => (
+              <span
+                key={v}
+                className="rounded-full border border-amber-800 bg-amber-950/40 px-2.5 py-1 text-xs text-amber-300"
+              >
+                {v}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Formula({ resultado }: { resultado: EventoResultado }) {
   const termos = resultado.coeficientes
     .slice()
@@ -312,6 +382,8 @@ export default function PainelResultado({ resultado }: { resultado: EventoResult
           ))}
         </div>
       </div>
+
+      <ComparacaoSignificancia resultado={resultado} />
 
       {resultado.coeficientes.length > 0 && <Formula resultado={resultado} />}
 
