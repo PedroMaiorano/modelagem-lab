@@ -9,7 +9,6 @@ interface Props {
   rodando: boolean;
   aoRodar: () => void;
   aoLimpar: () => void;
-  temResultado: boolean;
   painelUpload: ReactNode;
 }
 
@@ -20,7 +19,6 @@ export default function SidebarDataset({
   rodando,
   aoRodar,
   aoLimpar,
-  temResultado,
   painelUpload,
 }: Props) {
   return (
@@ -54,7 +52,7 @@ export default function SidebarDataset({
           )}
           {rodando ? "Rodando…" : "Rodar seleção"}
         </button>
-        {(temResultado || rodando) && (
+        {dataset && (
           <button
             onClick={aoLimpar}
             disabled={rodando}

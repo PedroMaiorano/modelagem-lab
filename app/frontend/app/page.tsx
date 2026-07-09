@@ -54,6 +54,10 @@ export default function Pagina() {
   const [linhas, setLinhas] = useState<LinhaProgresso[]>([]);
   const [resultado, setResultado] = useState<EventoResultado | null>(null);
   const [erroCarregamento, setErroCarregamento] = useState<string | null>(null);
+  // Incrementado a cada "Limpar resultado" — entra na `key` do PainelModulos
+  // pra forçar remontagem e limpar o estado local dele também (construção/
+  // categorização rodadas), que não vive aqui em cima.
+  const [resetKey, setResetKey] = useState(0);
 
   useEffect(() => {
     buscarDatasets()
@@ -67,6 +71,16 @@ export default function Pagina() {
   function limparResultado() {
     setLinhas([]);
     setResultado(null);
+  }
+
+  // Handler do botão "Limpar resultado" na sidebar: além de limpar o
+  // treinamento, força o PainelModulos a remontar (via resetKey na key),
+  // já que o estado de construção/categorização roda vive lá dentro, não
+  // aqui em cima. `aoMudarDataset`/`aoRodar` não chamam isto — só o clique
+  // explícito do usuário.
+  function aoLimparTudo() {
+    limparResultado();
+    setResetKey((k) => k + 1);
   }
 
   function aoMudarDataset(dataset: string) {
@@ -126,8 +140,7 @@ export default function Pagina() {
         aoMudarDataset={aoMudarDataset}
         rodando={rodando}
         aoRodar={aoRodar}
-        aoLimpar={limparResultado}
-        temResultado={linhas.length > 0 || resultado !== null}
+        aoLimpar={aoLimparTudo}
         painelUpload={<PainelUpload aoPreparar={aoPrepararNovoDataset} />}
       />
       <main className="flex-1 overflow-y-auto p-6">
@@ -173,7 +186,7 @@ export default function Pagina() {
 
         <div className={aba === "modulos" ? "" : "hidden"}>
           {config.dataset ? (
-            <PainelModulos key={config.dataset} dataset={config.dataset} />
+            <PainelModulos key={`${config.dataset}-${resetKey}`} dataset={config.dataset} />
           ) : (
             <p className="text-sm text-slate-600">Selecione um dataset primeiro.</p>
           )}
