@@ -22,7 +22,7 @@ export default function SidebarDataset({
   painelUpload,
 }: Props) {
   return (
-    <aside className="w-64 shrink-0 border-r border-slate-700 bg-slate-900/70 p-5 flex flex-col gap-5 overflow-y-auto">
+    <aside className="w-64 shrink-0 border-r border-slate-700 bg-slate-900/70 p-5 flex flex-col gap-5 overflow-y-auto print:hidden">
       {painelUpload}
 
       <div>

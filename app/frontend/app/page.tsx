@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import GraficoScoreAoVivo from "./components/GraficoScoreAoVivo";
+import ModeloAoVivo from "./components/ModeloAoVivo";
 import PainelConfig from "./components/PainelConfig";
 import PainelDatasetInfo from "./components/PainelDatasetInfo";
 import PainelModulos from "./components/PainelModulos";
@@ -8,6 +10,7 @@ import PainelUpload from "./components/PainelUpload";
 import SidebarDataset from "./components/SidebarDataset";
 import ProgressoAoVivo, { type LinhaProgresso } from "./components/ProgressoAoVivo";
 import PainelResultado from "./components/PainelResultado";
+import { interpretarProgresso } from "./lib/progresso";
 import {
   buscarDatasets,
   rodarPipelineComProgresso,
@@ -58,6 +61,7 @@ export default function Pagina() {
   // pra forçar remontagem e limpar o estado local dele também (construção/
   // categorização rodadas), que não vive aqui em cima.
   const [resetKey, setResetKey] = useState(0);
+  const estadoAoVivo = useMemo(() => interpretarProgresso(linhas), [linhas]);
 
   useEffect(() => {
     buscarDatasets()
@@ -133,7 +137,7 @@ export default function Pagina() {
   }
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen print:block print:h-auto">
       <SidebarDataset
         datasets={datasets}
         dataset={config.dataset}
@@ -143,8 +147,8 @@ export default function Pagina() {
         aoLimpar={aoLimparTudo}
         painelUpload={<PainelUpload aoPreparar={aoPrepararNovoDataset} />}
       />
-      <main className="flex-1 overflow-y-auto p-6">
-        <header className="mb-6 flex items-center justify-between">
+      <main className="flex-1 overflow-y-auto p-6 print:overflow-visible print:p-0">
+        <header className="mb-6 flex items-center justify-between print:hidden">
           <div>
             <h1 className="text-lg font-semibold text-slate-100">Pedro_Wise — dashboard</h1>
             <p className="text-sm text-slate-500">
@@ -157,7 +161,7 @@ export default function Pagina() {
           </div>
         </header>
 
-        <nav className="mb-6 flex gap-1 rounded-lg bg-slate-900/70 p-1 w-fit">
+        <nav className="mb-6 flex gap-1 rounded-lg bg-slate-900/70 p-1 w-fit print:hidden">
           {ABAS.map((a) => (
             <button
               key={a.id}
@@ -195,13 +199,44 @@ export default function Pagina() {
         <div className={aba === "treinamento" ? "" : "hidden"}>
           <div className="flex flex-col gap-8">
             <PainelConfig config={config} aoMudar={setConfig} rodando={rodando} />
-            <ProgressoAoVivo linhas={linhas} rodando={rodando} />
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_22rem]">
+              <ProgressoAoVivo linhas={linhas} rodando={rodando} />
+              {(linhas.length > 0 || rodando) && (
+                <div className="flex flex-col gap-6">
+                  <ModeloAoVivo estado={estadoAoVivo} rodando={rodando} />
+                  <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
+                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                      Score ao longo da busca
+                    </h3>
+                    <GraficoScoreAoVivo historico={estadoAoVivo.historicoScore} />
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
         <div className={aba === "resultados" ? "" : "hidden"}>
           {resultado ? (
-            <PainelResultado resultado={resultado} />
+            <div className="flex flex-col gap-6">
+              {/* Só aparece na impressão/PDF — no navegador, dataset/hora já
+                  estão implícitos no resto da UI, não precisa duplicar. */}
+              <div className="hidden print:block">
+                <h1 className="text-lg font-semibold text-slate-950">
+                  Relatório Pedro_Wise — {config.dataset}
+                </h1>
+                <p className="text-sm text-slate-600">Gerado em {new Date().toLocaleString("pt-BR")}</p>
+              </div>
+              <div className="flex justify-end print:hidden">
+                <button
+                  onClick={() => window.print()}
+                  className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-700 hover:text-emerald-400"
+                >
+                  Exportar PDF
+                </button>
+              </div>
+              <PainelResultado resultado={resultado} />
+            </div>
           ) : (
             <p className="text-sm text-slate-600">
               Nenhum resultado ainda — configure na aba &ldquo;Treinamento&rdquo; e rode em &ldquo;Rodar

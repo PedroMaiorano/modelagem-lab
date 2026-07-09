@@ -92,6 +92,18 @@ def run_pedro_wise_completo(
     candidatos_remover = sorted(candidatos_remover, key=lambda c: c.score, reverse=True)
     candidatos_remover = candidatos_remover[: config3.n_best_backward]
 
+    # Marcador de início — cada candidato dispara uma sub-busca completa
+    # (1+2+2.5) que também loga forward_simples/transformacao_simples/etc.
+    # através do MESMO logger global. Sem esse marcador (e o de fechamento
+    # logo abaixo, nos dois desfechos possíveis), quem consome o log ao vivo
+    # não tem como distinguir "isso é exploração de um ramo que pode ser
+    # descartado" de "isso é uma atualização real aceita no modelo".
+    logger.info(
+        "Nível 3: avaliando %d candidato(s) de remoção (profundidade %d)",
+        len(candidatos_remover),
+        _profundidade + 1,
+    )
+
     melhor_ramo: SelectionState | None = None
     melhor_trace_ramo = SearchTrace()
 
@@ -130,9 +142,27 @@ def run_pedro_wise_completo(
             melhor_ramo, melhor_trace_ramo = estado_ramo, trace_ramo
 
     if melhor_ramo is not None and melhor_ramo.score > estado.score:
-        logger.info("Nível 3: ramo vencedor supera o modelo atual => score=%.4f", melhor_ramo.score)
-        trace.registrar(f"backward_complexo: ramo vencedor => score={melhor_ramo.score:.4f}")
+        # O ramo vencedor roda uma busca completa (1+2+2.5) num universo sem a
+        # variável removida — o conjunto final pode ser totalmente diferente
+        # do modelo anterior, não só "+1/-1" variável. Sem listar as
+        # variáveis aqui, quem consome o log (ex.: a UI, pra mostrar "modelo
+        # atual" ao vivo) não tem como saber o estado real após este evento.
+        variaveis_ramo_vencedor = ",".join(melhor_ramo.variables)
+        logger.info(
+            "Nível 3: ramo vencedor supera o modelo atual => score=%.4f | variaveis=%s",
+            melhor_ramo.score,
+            variaveis_ramo_vencedor,
+        )
+        trace.registrar(
+            "backward_complexo: ramo vencedor => "
+            f"score={melhor_ramo.score:.4f} | variaveis={variaveis_ramo_vencedor}"
+        )
         trace.eventos.extend(melhor_trace_ramo.eventos)
         return melhor_ramo, trace
 
+    # Marcador de fechamento do outro desfecho possível: nenhum candidato
+    # superou o modelo atual, então tudo que os ramos exploraram (e já foi
+    # logado ao vivo) deve ser descartado — sem esta linha, o consumidor do
+    # log não tem como saber que a exploração acabou sem produzir nada.
+    logger.info("Nível 3: nenhum ramo superou o modelo atual => score=%.4f", estado.score)
     return estado, trace
