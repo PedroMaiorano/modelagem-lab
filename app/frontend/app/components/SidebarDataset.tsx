@@ -43,7 +43,7 @@ export default function SidebarDataset({
         </select>
       </div>
 
-      <div className="mt-auto flex flex-col gap-2">
+      <div className="flex flex-col gap-2">
         <button
           onClick={aoRodar}
           disabled={rodando || !dataset}

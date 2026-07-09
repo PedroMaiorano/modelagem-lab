@@ -12,56 +12,65 @@ interface Props {
   dataset: string;
 }
 
-function BarraIVMini({ variavel, iv, classificacao, maximo }: { variavel: string; iv: number; classificacao: string; maximo: number }) {
+function BarraIVMini({
+  variavel,
+  iv,
+  classificacao,
+  maximo,
+}: {
+  variavel: string;
+  iv: number;
+  classificacao: string;
+  maximo: number;
+}) {
   const largura = maximo > 0 ? Math.max(4, (iv / maximo) * 100) : 0;
   return (
     <div className="flex items-center gap-3 text-xs">
-      <div className="w-36 shrink-0 truncate text-slate-400" title={variavel}>
+      <div className="w-28 shrink-0 truncate text-slate-400" title={variavel}>
         {variavel}
       </div>
       <div className="h-3 flex-1 overflow-hidden rounded-full bg-slate-800/50">
-        <div className="h-full rounded bg-sky-600" style={{ width: `${largura}%` }} />
+        <div className="h-full rounded-full bg-sky-600" style={{ width: `${largura}%` }} />
       </div>
-      <div className="w-16 shrink-0 text-right tabular-nums text-slate-400">{iv.toFixed(3)}</div>
-      <div className="w-40 shrink-0 truncate text-[11px] text-slate-500">{classificacao}</div>
+      <div className="w-14 shrink-0 text-right tabular-nums text-slate-400">{iv.toFixed(3)}</div>
+      <div className="w-32 shrink-0 truncate text-[11px] text-slate-500">{classificacao}</div>
     </div>
   );
 }
 
-function Etapa({
+function Modulo({
+  numero,
   titulo,
   descricao,
-  aberta,
-  aoAlternar,
+  acoes,
   children,
 }: {
+  numero: number;
   titulo: string;
   descricao: string;
-  aberta: boolean;
-  aoAlternar: () => void;
+  acoes: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-slate-800/50 bg-slate-900/30">
-      <button
-        onClick={aoAlternar}
-        className="flex w-full items-center justify-between px-5 py-4 text-left"
-      >
+    <div className="flex flex-col gap-4 rounded-xl border border-slate-800/50 bg-slate-900/30 p-5">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-sm font-semibold text-slate-100">{titulo}</h3>
-          <p className="text-xs text-slate-500">{descricao}</p>
+          <div className="flex items-center gap-2">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-800 text-[11px] font-semibold text-slate-400">
+              {numero}
+            </span>
+            <h3 className="text-sm font-semibold text-slate-100">{titulo}</h3>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">{descricao}</p>
         </div>
-        <span className="text-slate-500 text-xs">{aberta ? "▾" : "▸"}</span>
-      </button>
-      {aberta && <div className="border-t border-slate-800/50 p-5">{children}</div>}
+        {acoes}
+      </div>
+      {children}
     </div>
   );
 }
 
 export default function PainelModulos({ dataset }: Props) {
-  const [abertaConstrucao, setAbertaConstrucao] = useState(false);
-  const [abertaCategorizacao, setAbertaCategorizacao] = useState(false);
-
   const [rodandoConstrucao, setRodandoConstrucao] = useState(false);
   const [resultadoConstrucao, setResultadoConstrucao] = useState<ResultadoConstrucao | null>(null);
   const [erroConstrucao, setErroConstrucao] = useState<string | null>(null);
@@ -99,33 +108,39 @@ export default function PainelModulos({ dataset }: Props) {
 
   const maximoIV = Math.max(0, ...(resultadoCategorizacao?.iv.map((i) => i.iv) ?? []));
 
-  return (
-    <div className="flex flex-col gap-4 max-w-3xl">
-      <p className="text-sm text-slate-500">
-        Rode e inspecione cada etapa isoladamente antes do treinamento.
-      </p>
+  const botao = (rodando: boolean, aoClicar: () => void, rotulo: string) => (
+    <button
+      onClick={aoClicar}
+      disabled={rodando}
+      className="shrink-0 rounded-lg bg-slate-800/70 border border-slate-700/50 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-700 hover:text-emerald-400 disabled:opacity-50"
+    >
+      {rodando ? "Rodando…" : rotulo}
+    </button>
+  );
 
-      <Etapa
-        titulo="1. Construção"
-        descricao="Razões/diferenças de negócio, quando aplicáveis ao dataset."
-        aberta={abertaConstrucao}
-        aoAlternar={() => setAbertaConstrucao((v) => !v)}
-      >
-        <button
-          onClick={() => void aoRodarConstrucao()}
-          disabled={rodandoConstrucao}
-          className="rounded-lg bg-slate-800/60 border border-slate-700/50 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-700 hover:text-emerald-400 disabled:opacity-50"
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-slate-500">Rode e inspecione cada etapa isoladamente antes do treinamento.</p>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <Modulo
+          numero={1}
+          titulo="Construção"
+          descricao="Razões/diferenças de negócio, quando aplicáveis ao dataset."
+          acoes={botao(rodandoConstrucao, () => void aoRodarConstrucao(), "Rodar")}
         >
-          {rodandoConstrucao ? "Rodando…" : "Rodar construção"}
-        </button>
-        {erroConstrucao && <p className="mt-2 text-xs text-red-400">{erroConstrucao}</p>}
-        {resultadoConstrucao && (
-          <div className="mt-3 text-xs text-slate-400">
-            {resultadoConstrucao.colunas_novas.length === 0 ? (
-              <p>Nenhuma razão de negócio aplicável a este dataset (colunas necessárias ausentes).</p>
+          {erroConstrucao && <p className="text-xs text-red-400">{erroConstrucao}</p>}
+          {!resultadoConstrucao && !erroConstrucao && (
+            <p className="text-xs text-slate-600">Ainda não rodado.</p>
+          )}
+          {resultadoConstrucao &&
+            (resultadoConstrucao.colunas_novas.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                Nenhuma razão de negócio aplicável a este dataset (colunas necessárias ausentes).
+              </p>
             ) : (
-              <>
-                <p className="mb-1.5">
+              <div className="text-xs text-slate-400">
+                <p className="mb-2">
                   {resultadoConstrucao.colunas_novas.length} colunas novas de{" "}
                   {resultadoConstrucao.n_colunas_total} candidatas totais:
                 </p>
@@ -139,46 +154,41 @@ export default function PainelModulos({ dataset }: Props) {
                     </span>
                   ))}
                 </div>
-              </>
-            )}
-          </div>
-        )}
-      </Etapa>
+              </div>
+            ))}
+        </Modulo>
 
-      <Etapa
-        titulo="2. Categorização + Transformação"
-        descricao="Binning monotônico + WOE, com Information Value por variável."
-        aberta={abertaCategorizacao}
-        aoAlternar={() => setAbertaCategorizacao((v) => !v)}
-      >
-        <label className="mb-3 flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={usarConstrucao}
-            onChange={(e) => setUsarConstrucao(e.target.checked)}
-            className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500"
-          />
-          incluir variáveis construídas (etapa 1)
-        </label>
-        <button
-          onClick={() => void aoRodarCategorizacao()}
-          disabled={rodandoCategorizacao}
-          className="rounded-lg bg-slate-800/60 border border-slate-700/50 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-700 hover:text-emerald-400 disabled:opacity-50"
+        <Modulo
+          numero={2}
+          titulo="Categorização + Transformação"
+          descricao="Binning monotônico + WOE, com Information Value por variável."
+          acoes={botao(rodandoCategorizacao, () => void aoRodarCategorizacao(), "Rodar")}
         >
-          {rodandoCategorizacao ? "Rodando…" : "Rodar categorização + transformação"}
-        </button>
-        {erroCategorizacao && <p className="mt-2 text-xs text-red-400">{erroCategorizacao}</p>}
-        {resultadoCategorizacao && (
-          <div className="mt-3 flex flex-col gap-2">
-            <p className="text-xs text-slate-500">{resultadoCategorizacao.n_variaveis} variáveis transformadas</p>
-            <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto">
-              {resultadoCategorizacao.iv.map((item) => (
-                <BarraIVMini key={item.variavel} maximo={maximoIV} {...item} />
-              ))}
+          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={usarConstrucao}
+              onChange={(e) => setUsarConstrucao(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500"
+            />
+            incluir variáveis construídas (etapa 1)
+          </label>
+          {erroCategorizacao && <p className="text-xs text-red-400">{erroCategorizacao}</p>}
+          {!resultadoCategorizacao && !erroCategorizacao && (
+            <p className="text-xs text-slate-600">Ainda não rodado.</p>
+          )}
+          {resultadoCategorizacao && (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-slate-500">{resultadoCategorizacao.n_variaveis} variáveis transformadas</p>
+              <div className="flex flex-col gap-1.5 max-h-72 overflow-y-auto pr-1">
+                {resultadoCategorizacao.iv.map((item) => (
+                  <BarraIVMini key={item.variavel} maximo={maximoIV} {...item} />
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-      </Etapa>
+          )}
+        </Modulo>
+      </div>
 
       <p className="text-xs text-slate-600">
         3. Treinamento (Pedro_Wise) — configure na aba &ldquo;Treinamento&rdquo; e rode em &ldquo;Rodar

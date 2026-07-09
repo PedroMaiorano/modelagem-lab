@@ -22,6 +22,7 @@ from typing import Any
 _RAIZ = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_RAIZ / "python"))
 
+import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from categorizacao import aplicar_bins, bins_monotonicos  # noqa: E402
 from construcao import construir_razoes_em_lote  # noqa: E402
@@ -197,6 +198,51 @@ def rodar_categorizacao_transformacao(dataset: str, usar_construcao: bool = True
     }
 
 
+def _tabela_decis(y: pd.Series, prob: np.ndarray, n_faixas: int = 10) -> list[dict[str, Any]]:
+    """Tabela de decis (gains/KS table) — padrão em credit scoring pra
+    inspecionar visualmente onde o modelo separa evento/não-evento, não só
+    o KS/AUC agregados. Ordena por score decrescente (maior risco primeiro),
+    divide em `n_faixas` grupos de tamanho ~igual, e acumula % de eventos e
+    não-eventos capturados até cada faixa — a maior diferença entre as duas
+    curvas acumuladas é o próprio KS.
+    """
+    n = len(y)
+    if n == 0:
+        return []
+    ordem = np.argsort(-prob)
+    y_ordenado = y.to_numpy()[ordem]
+    total_eventos = int(y_ordenado.sum())
+    total_nao_eventos = n - total_eventos
+
+    tamanho_faixa = max(1, n // n_faixas)
+    linhas: list[dict[str, Any]] = []
+    eventos_acumulados = 0
+    nao_eventos_acumulados = 0
+    for i in range(n_faixas):
+        inicio = i * tamanho_faixa
+        if inicio >= n:
+            break
+        fim = n if i == n_faixas - 1 else min(n, inicio + tamanho_faixa)
+        fatia = y_ordenado[inicio:fim]
+        n_fatia = len(fatia)
+        eventos = int(fatia.sum())
+        eventos_acumulados += eventos
+        nao_eventos_acumulados += n_fatia - eventos
+        pct_eventos_acum = eventos_acumulados / total_eventos if total_eventos else 0.0
+        pct_nao_eventos_acum = nao_eventos_acumulados / total_nao_eventos if total_nao_eventos else 0.0
+        linhas.append(
+            {
+                "faixa": i + 1,
+                "n": n_fatia,
+                "taxa_evento": eventos / n_fatia if n_fatia else 0.0,
+                "pct_eventos_capturados": pct_eventos_acum,
+                "pct_nao_eventos_capturados": pct_nao_eventos_acum,
+                "ks_acumulado": abs(pct_eventos_acum - pct_nao_eventos_acum),
+            }
+        )
+    return linhas
+
+
 def rodar_pipeline(
     dataset: str,
     *,
@@ -293,9 +339,11 @@ def rodar_pipeline(
         )
         prob_teste = estado_final.model.predict_proba(df_teste[variaveis])
         auc = float(roc_auc_score(df_teste["y"], prob_teste))
+        tabela_decis = _tabela_decis(df_teste["y"], prob_teste)
     else:
         ks_teste = 0.0
         auc = 0.5
+        tabela_decis = []
 
     iv_ordenado = sorted(iv_por_variavel.items(), key=lambda kv: kv[1], reverse=True)[:10]
 
@@ -307,5 +355,6 @@ def rodar_pipeline(
         "auc": auc,
         "n_eventos": len(trace.eventos),
         "top_iv": [{"variavel": v, "iv": iv} for v, iv in iv_ordenado],
+        "tabela_decis": tabela_decis,
         "tempo_segundos": round(time.perf_counter() - t0, 1),
     }

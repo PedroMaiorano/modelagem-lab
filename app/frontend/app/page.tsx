@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import PainelConfig from "./components/PainelConfig";
+import PainelDatasetInfo from "./components/PainelDatasetInfo";
 import PainelModulos from "./components/PainelModulos";
 import PainelUpload from "./components/PainelUpload";
 import SidebarDataset from "./components/SidebarDataset";
@@ -140,15 +141,15 @@ export default function Pagina() {
           </div>
         </header>
 
-        <nav className="mb-6 flex gap-1 border-b border-slate-800/60">
+        <nav className="mb-6 flex gap-1 rounded-lg bg-slate-900/40 p-1 w-fit">
           {ABAS.map((a) => (
             <button
               key={a.id}
               onClick={() => setAba(a.id)}
-              className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
+              className={`rounded-md px-4 py-1.5 text-sm font-medium transition ${
                 aba === a.id
-                  ? "border-emerald-500 text-slate-100"
-                  : "border-transparent text-slate-500 hover:text-slate-300"
+                  ? "bg-slate-700 text-white shadow-sm"
+                  : "text-slate-400 hover:text-slate-200"
               }`}
             >
               {a.rotulo}
@@ -156,27 +157,26 @@ export default function Pagina() {
           ))}
         </nav>
 
-        {aba === "dataset" && (
-          <div className="max-w-lg">
-            <p className="text-sm text-slate-500">
-              Dataset ativo: <span className="text-slate-200">{config.dataset || "nenhum selecionado"}</span>
-            </p>
-            <p className="mt-1 text-xs text-slate-600">
-              Use &ldquo;+ Novo dataset&rdquo; na barra lateral pra enviar um CSV novo, ou escolha um já
-              preparado no seletor. Depois vá pra aba &ldquo;Módulos&rdquo; pra inspecionar construção e
-              categorização, ou direto pra &ldquo;Treinamento&rdquo;.
-            </p>
-          </div>
-        )}
+        {/* As 3 abas ficam sempre montadas (só escondidas via CSS) — desmontar
+            e remontar a cada troca de aba resetava o estado local dos
+            módulos (o que o usuário reportou como "abas limpando sozinhas"). */}
+        <div className={aba === "dataset" ? "" : "hidden"}>
+          {config.dataset ? (
+            <PainelDatasetInfo key={config.dataset} dataset={config.dataset} />
+          ) : (
+            <p className="text-sm text-slate-600">Selecione um dataset primeiro.</p>
+          )}
+        </div>
 
-        {aba === "modulos" &&
-          (config.dataset ? (
+        <div className={aba === "modulos" ? "" : "hidden"}>
+          {config.dataset ? (
             <PainelModulos key={config.dataset} dataset={config.dataset} />
           ) : (
             <p className="text-sm text-slate-600">Selecione um dataset primeiro.</p>
-          ))}
+          )}
+        </div>
 
-        {aba === "treinamento" && (
+        <div className={aba === "treinamento" ? "" : "hidden"}>
           <div className="flex flex-col gap-8">
             <PainelConfig config={config} aoMudar={setConfig} rodando={rodando} />
             <div className="flex flex-col gap-6">
@@ -184,7 +184,7 @@ export default function Pagina() {
               {resultado && <PainelResultado resultado={resultado} />}
             </div>
           </div>
-        )}
+        </div>
       </main>
     </div>
   );

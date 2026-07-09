@@ -10,8 +10,8 @@ interface Props {
 
 function Secao({ titulo, children }: { titulo: string; children: React.ReactNode }) {
   return (
-    <div>
-      <h2 className="text-xs font-medium uppercase tracking-wider text-slate-500 mb-2">{titulo}</h2>
+    <div className="rounded-xl border border-slate-800/50 bg-slate-900/30 p-5">
+      <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">{titulo}</h2>
       {children}
     </div>
   );

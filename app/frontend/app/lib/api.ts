@@ -171,6 +171,15 @@ export interface ItemIV {
   iv: number;
 }
 
+export interface FaixaDecil {
+  faixa: number;
+  n: number;
+  taxa_evento: number;
+  pct_eventos_capturados: number;
+  pct_nao_eventos_capturados: number;
+  ks_acumulado: number;
+}
+
 export interface EventoResultado {
   tipo: "resultado";
   variaveis: string[];
@@ -179,6 +188,7 @@ export interface EventoResultado {
   auc: number;
   n_eventos: number;
   top_iv: ItemIV[];
+  tabela_decis: FaixaDecil[];
   tempo_segundos: number;
 }
 
@@ -187,6 +197,19 @@ export type EventoProgresso = EventoEtapa | EventoLog | EventoErro | EventoResul
 export async function buscarDatasets(): Promise<string[]> {
   const resp = await fetch(`${URL_API}/api/datasets`);
   if (!resp.ok) throw new Error(`Falha ao listar datasets (${resp.status})`);
+  return resp.json();
+}
+
+export interface PreviewDataset {
+  colunas: string[];
+  n_dev: number;
+  n_teste: number;
+  amostra: Record<string, unknown>[];
+}
+
+export async function buscarPreviewDataset(nome: string): Promise<PreviewDataset> {
+  const resp = await fetch(`${URL_API}/api/datasets/${encodeURIComponent(nome)}/preview`);
+  if (!resp.ok) throw new Error(`Falha ao carregar preview de '${nome}' (${resp.status})`);
   return resp.json();
 }
 
