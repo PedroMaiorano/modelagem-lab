@@ -104,11 +104,17 @@ export default function Pagina() {
         painelUpload={<PainelUpload aoPreparar={aoPrepararNovoDataset} />}
       />
       <main className="flex-1 overflow-y-auto p-6">
-        <header className="mb-6">
-          <h1 className="text-lg font-semibold text-slate-100">Pedro_Wise — dashboard</h1>
-          <p className="text-sm text-slate-500">
-            Construção → categorização → transformação → treinamento, em tempo real.
-          </p>
+        <header className="mb-6 flex items-center justify-between border-b border-slate-800 pb-4">
+          <div>
+            <h1 className="text-lg font-semibold text-slate-100">Pedro_Wise — dashboard</h1>
+            <p className="text-sm text-slate-500">
+              Construção → categorização → transformação → treinamento, em tempo real.
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/50 px-2.5 py-1 text-[11px] text-slate-500">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            backend conectado
+          </div>
         </header>
 
         <div className="flex flex-col gap-6">
