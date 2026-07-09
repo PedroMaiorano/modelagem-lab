@@ -202,6 +202,20 @@ function GraficoTaxaEvento({ tabela }: { tabela: FaixaDecil[] }) {
   );
 }
 
+function formatarPValor(p: number): string {
+  return p < 0.0001 ? "<0.0001" : p.toFixed(4);
+}
+
+/** `*` = p<0.05, `**` = p<0.01, `***` = p<0.001 — convenção padrão de
+ * relatórios de regressão, útil pra escanear rapidamente quais coeficientes
+ * são estatisticamente significativos SEM ler cada p-valor numérico. */
+function marcadorSignificancia(p: number): string {
+  if (p < 0.001) return "***";
+  if (p < 0.01) return "**";
+  if (p < 0.05) return "*";
+  return "";
+}
+
 function Formula({ resultado }: { resultado: EventoResultado }) {
   const termos = resultado.coeficientes
     .slice()
@@ -213,10 +227,11 @@ function Formula({ resultado }: { resultado: EventoResultado }) {
         Fórmula do modelo (logit)
       </h3>
       <p className="mb-3 text-[11px] text-slate-600">
-        log-odds do evento = intercepto + soma dos coeficientes × variável. Ordenado por magnitude do
-        coeficiente.
+        log-odds do evento = intercepto + soma dos coeficientes × variável. O Pedro_Wise seleciona
+        variáveis só pelo KS — p-valor/erro padrão aqui são diagnóstico pós-hoc, não influenciam a
+        seleção (ver pergunta sobre isso na conversa).
       </p>
-      <p className="mb-3 overflow-x-auto whitespace-nowrap font-mono text-xs text-slate-300">
+      <p className="mb-4 overflow-x-auto whitespace-nowrap font-mono text-xs text-slate-300">
         logit(p) = {resultado.intercepto.toFixed(4)}
         {termos.map((t) => (
           <span key={t.variavel}>
@@ -225,24 +240,44 @@ function Formula({ resultado }: { resultado: EventoResultado }) {
           </span>
         ))}
       </p>
-      <div className="flex flex-col gap-1 text-xs">
-        <div className="flex items-center gap-3 text-slate-500">
-          <div className="w-40 shrink-0">variável</div>
-          <div className="flex-1 text-right">coeficiente</div>
-        </div>
-        <div className="flex items-center gap-3 border-t border-slate-800 pt-1 text-slate-300">
-          <div className="w-40 shrink-0">intercepto</div>
-          <div className="flex-1 text-right tabular-nums">{resultado.intercepto.toFixed(4)}</div>
-        </div>
-        {termos.map((t) => (
-          <div key={t.variavel} className="flex items-center gap-3 text-slate-300">
-            <div className="w-40 shrink-0 truncate" title={t.variavel}>
-              {t.variavel}
-            </div>
-            <div className="flex-1 text-right tabular-nums">{t.coeficiente.toFixed(4)}</div>
-          </div>
-        ))}
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead>
+            <tr className="border-b border-slate-700 text-slate-500">
+              <th className="py-1.5 pr-4 font-medium">variável</th>
+              <th className="py-1.5 pr-4 text-right font-medium">coeficiente</th>
+              <th className="py-1.5 pr-4 text-right font-medium">erro padrão</th>
+              <th className="py-1.5 pr-4 text-right font-medium">p-valor</th>
+              <th className="py-1.5 text-left font-medium">sig.</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-b border-slate-800 text-slate-300">
+              <td className="py-1.5 pr-4">intercepto</td>
+              <td className="py-1.5 pr-4 text-right tabular-nums">{resultado.intercepto.toFixed(4)}</td>
+              <td className="py-1.5 pr-4 text-right tabular-nums">
+                {resultado.intercepto_erro_padrao.toFixed(4)}
+              </td>
+              <td className="py-1.5 pr-4 text-right tabular-nums">
+                {formatarPValor(resultado.intercepto_p_valor)}
+              </td>
+              <td className="py-1.5 text-amber-400">{marcadorSignificancia(resultado.intercepto_p_valor)}</td>
+            </tr>
+            {termos.map((t) => (
+              <tr key={t.variavel} className="border-b border-slate-800/60 text-slate-300 last:border-0">
+                <td className="py-1.5 pr-4 truncate" title={t.variavel}>
+                  {t.variavel}
+                </td>
+                <td className="py-1.5 pr-4 text-right tabular-nums">{t.coeficiente.toFixed(4)}</td>
+                <td className="py-1.5 pr-4 text-right tabular-nums">{t.erro_padrao.toFixed(4)}</td>
+                <td className="py-1.5 pr-4 text-right tabular-nums">{formatarPValor(t.p_valor)}</td>
+                <td className="py-1.5 text-amber-400">{marcadorSignificancia(t.p_valor)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
+      <p className="mt-2 text-[11px] text-slate-600">* p&lt;0.05 · ** p&lt;0.01 · *** p&lt;0.001</p>
     </div>
   );
 }
@@ -252,9 +287,12 @@ export default function PainelResultado({ resultado }: { resultado: EventoResult
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
         <Metrica rotulo="KS (teste)" valor={resultado.ks_teste.toFixed(4)} />
+        <Metrica rotulo="KS (treino)" valor={resultado.ks_dev.toFixed(4)} />
+        <Metrica rotulo="GINI" valor={resultado.gini.toFixed(3)} />
         <Metrica rotulo="AUC" valor={resultado.auc.toFixed(3)} />
+        <Metrica rotulo="Taxa de mau (teste)" valor={`${(resultado.taxa_evento_teste * 100).toFixed(1)}%`} />
         <Metrica rotulo="Variáveis" valor={String(resultado.variaveis.length)} />
         <Metrica rotulo="Tempo" valor={`${resultado.tempo_segundos}s`} />
       </div>
@@ -285,16 +323,16 @@ export default function PainelResultado({ resultado }: { resultado: EventoResult
             </h3>
             <p className="mb-2 text-[11px] text-slate-600">
               % acumulado de <span className="text-emerald-400">eventos</span> vs.{" "}
-              <span className="text-slate-400">não-eventos</span> por faixa de score.
+              <span className="text-slate-400">não-eventos</span> por faixa de score, base de teste.
             </p>
             <GraficoKS tabela={resultado.tabela_decis} />
           </div>
           <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
             <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Taxa de evento por faixa
+              Taxa de evento por faixa (teste)
             </h3>
             <p className="mb-2 text-[11px] text-slate-600">
-              Decis de score — passe o mouse numa barra pra ver n e taxa exata.
+              Decis de score, base de teste — passe o mouse numa barra pra ver n e taxa exata.
             </p>
             <GraficoTaxaEvento tabela={resultado.tabela_decis} />
           </div>

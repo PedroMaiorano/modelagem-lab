@@ -29,6 +29,24 @@ class _FittedGLM:
         """
         return {str(nome): float(valor) for nome, valor in self._result.params.items()}
 
+    def estatisticas(self) -> dict[str, dict[str, float]]:
+        """Coeficiente + erro padrão + p-valor por variável (intercepto sob
+        `"const"`) — o Pedro_Wise em si NUNCA usa p-valor pra decidir nada
+        (a seleção é 100% guiada por KS, tanto no R original quanto aqui,
+        ver `docs/algoritmos-originais/Pedro_Wise_3.0.1.R` — sem qualquer
+        `summary()`/teste de significância no laço de busca). Isto aqui é
+        só diagnóstico pós-hoc pra exibir na interface, não influencia a
+        seleção.
+        """
+        return {
+            str(nome): {
+                "coeficiente": float(self._result.params[nome]),
+                "erro_padrao": float(self._result.bse[nome]),
+                "p_valor": float(self._result.pvalues[nome]),
+            }
+            for nome in self._result.params.index
+        }
+
 
 class LogisticGLM:
     """GLM binomial (logística) via statsmodels — equivalente a `glm(y ~ ., family=binomial)`."""

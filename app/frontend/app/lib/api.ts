@@ -204,18 +204,25 @@ export interface FaixaDecil {
 export interface Coeficiente {
   variavel: string;
   coeficiente: number;
+  erro_padrao: number;
+  p_valor: number;
 }
 
 export interface EventoResultado {
   tipo: "resultado";
   variaveis: string[];
-  ks_dev: number | null;
+  ks_dev: number;
   ks_teste: number;
   auc: number;
+  gini: number;
+  taxa_evento_dev: number;
+  taxa_evento_teste: number;
   n_eventos: number;
   top_iv: ItemIV[];
   tabela_decis: FaixaDecil[];
   intercepto: number;
+  intercepto_erro_padrao: number;
+  intercepto_p_valor: number;
   coeficientes: Coeficiente[];
   tempo_segundos: number;
 }

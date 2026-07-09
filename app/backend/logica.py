@@ -416,27 +416,47 @@ def rodar_pipeline(
 
     variaveis = list(estado_final.variables)
     metric_teste = KSGaussianMetric(criterio="teste")
+    metric_dev = KSGaussianMetric(criterio="dev")
+    taxa_evento_teste = float(df_teste["y"].mean())
+    taxa_evento_dev = float(df_dev["y"].mean())
     if variaveis:
         ks_teste = metric_teste(
             estado_final.model, df_dev[variaveis], df_dev["y"], df_teste[variaveis], df_teste["y"]
         )
+        ks_dev = metric_dev(
+            estado_final.model, df_dev[variaveis], df_dev["y"], df_teste[variaveis], df_teste["y"]
+        )
         prob_teste = estado_final.model.predict_proba(df_teste[variaveis])
         auc = float(roc_auc_score(df_teste["y"], prob_teste))
+        gini = 2 * auc - 1
         tabela_decis = _tabela_decis(df_teste["y"], prob_teste)
         # FittedModel (Protocol) só garante variables/predict_proba — genérico
         # de propósito, pra caber estimadores futuros sem coeficiente linear
         # (sklearn/boosting). LogisticGLM (o único estimador hoje) tem
-        # coeficientes(); resultado_final.model é sempre um LogisticGLM aqui.
-        coeficientes = estado_final.model.coeficientes()  # type: ignore[attr-defined]
-        intercepto = coeficientes.get("const", 0.0)
+        # estatisticas(); resultado_final.model é sempre um LogisticGLM aqui.
+        stats = estado_final.model.estatisticas()  # type: ignore[attr-defined]
+        stats_intercepto = stats.get("const", {"coeficiente": 0.0, "erro_padrao": 0.0, "p_valor": 1.0})
+        intercepto = stats_intercepto["coeficiente"]
+        intercepto_erro_padrao = stats_intercepto["erro_padrao"]
+        intercepto_p_valor = stats_intercepto["p_valor"]
         coeficientes_variaveis = [
-            {"variavel": v, "coeficiente": coeficientes.get(v, 0.0)} for v in variaveis
+            {
+                "variavel": v,
+                "coeficiente": stats[v]["coeficiente"],
+                "erro_padrao": stats[v]["erro_padrao"],
+                "p_valor": stats[v]["p_valor"],
+            }
+            for v in variaveis
         ]
     else:
         ks_teste = 0.0
+        ks_dev = 0.0
         auc = 0.5
+        gini = 0.0
         tabela_decis = []
         intercepto = 0.0
+        intercepto_erro_padrao = 0.0
+        intercepto_p_valor = 1.0
         coeficientes_variaveis = []
 
     iv_ordenado = sorted(iv_por_variavel.items(), key=lambda kv: kv[1], reverse=True)[:10]
@@ -444,13 +464,18 @@ def rodar_pipeline(
     return {
         "tipo": "resultado",
         "variaveis": variaveis,
-        "ks_dev": estado_final.score if criterio == "dev" else None,
+        "ks_dev": ks_dev,
         "ks_teste": ks_teste,
         "auc": auc,
+        "gini": gini,
+        "taxa_evento_dev": taxa_evento_dev,
+        "taxa_evento_teste": taxa_evento_teste,
         "n_eventos": len(trace.eventos),
         "top_iv": [{"variavel": v, "iv": iv} for v, iv in iv_ordenado],
         "tabela_decis": tabela_decis,
         "intercepto": intercepto,
+        "intercepto_erro_padrao": intercepto_erro_padrao,
+        "intercepto_p_valor": intercepto_p_valor,
         "coeficientes": coeficientes_variaveis,
         "tempo_segundos": round(time.perf_counter() - t0, 1),
     }
