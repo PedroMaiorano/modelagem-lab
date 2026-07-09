@@ -34,12 +34,14 @@ const CONFIG_INICIAL: ConfigPipeline = {
   nivel3_ativado: false,
   n_best_backward: 2,
   profundidade_maxima_nivel3: 2,
+  gerar_transformacoes_potencia: true,
 };
 
 const ABAS = [
   { id: "dataset", rotulo: "Dataset" },
   { id: "modulos", rotulo: "Módulos" },
   { id: "treinamento", rotulo: "Treinamento" },
+  { id: "resultados", rotulo: "Resultados" },
 ] as const;
 
 type Aba = (typeof ABAS)[number]["id"];
@@ -87,6 +89,7 @@ export default function Pagina() {
       await rodarPipelineComProgresso(config, (evento) => {
         if (evento.tipo === "resultado") {
           setResultado(evento);
+          setAba("resultados");
         } else {
           setLinhas((atual) => [...atual, evento]);
         }
@@ -179,11 +182,19 @@ export default function Pagina() {
         <div className={aba === "treinamento" ? "" : "hidden"}>
           <div className="flex flex-col gap-8">
             <PainelConfig config={config} aoMudar={setConfig} rodando={rodando} />
-            <div className="flex flex-col gap-6">
-              <ProgressoAoVivo linhas={linhas} rodando={rodando} />
-              {resultado && <PainelResultado resultado={resultado} />}
-            </div>
+            <ProgressoAoVivo linhas={linhas} rodando={rodando} />
           </div>
+        </div>
+
+        <div className={aba === "resultados" ? "" : "hidden"}>
+          {resultado ? (
+            <PainelResultado resultado={resultado} />
+          ) : (
+            <p className="text-sm text-slate-600">
+              Nenhum resultado ainda — configure na aba &ldquo;Treinamento&rdquo; e rode em &ldquo;Rodar
+              seleção&rdquo; na barra lateral.
+            </p>
+          )}
         </div>
       </main>
     </div>

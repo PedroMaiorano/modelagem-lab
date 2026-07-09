@@ -38,7 +38,7 @@ from pedro_wise.types import (  # noqa: E402
     ShadowProbingConfig,
 )
 from sklearn.metrics import roc_auc_score  # noqa: E402
-from transformacao import ajustar_woe, aplicar_woe, classificar_iv  # noqa: E402
+from transformacao import ajustar_woe, aplicar_woe, classificar_iv, gerar_transformacoes_fixas  # noqa: E402
 
 DIR_DADOS = _RAIZ / "data"
 
@@ -87,8 +87,10 @@ def carregar_dataset(nome: str) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def preview_dataset(nome: str, n: int = 5) -> dict[str, Any]:
     df_dev, df_teste = carregar_dataset(nome)
+    colunas_numericas = [c for c in df_dev.columns if c != "y" and pd.api.types.is_numeric_dtype(df_dev[c])]
     return {
         "colunas": list(df_dev.columns),
+        "colunas_numericas": colunas_numericas,
         "n_dev": len(df_dev),
         "n_teste": len(df_teste),
         "amostra": df_dev.head(n).to_dict(orient="records"),
@@ -142,10 +144,18 @@ def _construir(
 
 
 def _categorizar_e_transformar(
-    df_dev: pd.DataFrame, df_teste: pd.DataFrame, fila: queue.Queue[dict[str, Any]]
+    df_dev: pd.DataFrame,
+    df_teste: pd.DataFrame,
+    fila: queue.Queue[dict[str, Any]],
+    gerar_transformacoes_potencia: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
     """Categorização (bins monotônicos) + transformação (WOE) — módulos
-    isolados, ver `python/categorizacao/` e `python/transformacao/`.
+    isolados, ver `python/categorizacao/` e `python/transformacao/`. Para
+    variáveis numéricas, opcionalmente também gera log/raiz/quad/cubo/
+    inversas (`gerar_transformacoes_fixas`) como candidatas extras — o
+    Pedro_Wise (nível 1, `transformacao_simples`) já sabe testar trocar a
+    versão WOE por uma dessas via `pedro_wise.base.extrair_base`, desde que
+    compartilhem o mesmo prefixo de base, que é o que garantimos aqui.
     """
     colunas_candidatas = [c for c in df_dev.columns if c != "y"]
     fila.put({"tipo": "etapa", "mensagem": f"Categorização + WOE: {len(colunas_candidatas)} candidatas"})
@@ -153,10 +163,19 @@ def _categorizar_e_transformar(
     woe_dev: dict[str, Any] = {"y": df_dev["y"]}
     woe_teste: dict[str, Any] = {"y": df_teste["y"]}
     iv_por_variavel: dict[str, float] = {}
+    n_potencia = 0
 
     for coluna in colunas_candidatas:
         try:
-            if pd.api.types.is_numeric_dtype(df_dev[coluna]):
+            # datasets sintéticos do lab já nomeiam a variável crua com sufixo
+            # "_woe" por convenção (ver docs/algoritmos-originais/pedro-wise-resumo.md)
+            # — usamos a base semântica (sem esse sufixo) tanto pro nome WOE
+            # quanto pras transformações de potência, senão elas ficariam com
+            # bases diferentes e o Pedro_Wise nunca as veria como alternativas.
+            base_semantica = coluna[:-4] if coluna.endswith("_woe") else coluna
+            eh_numerica = pd.api.types.is_numeric_dtype(df_dev[coluna])
+
+            if eh_numerica:
                 # Numérica: categoriza (binning monotônico) antes do WOE.
                 resultado_bin = bins_monotonicos(df_dev[coluna], df_dev["y"], n_bins_inicial=15)
                 if len(resultado_bin.edges) < 3:
@@ -172,24 +191,41 @@ def _categorizar_e_transformar(
                 bin_teste = df_teste[coluna]
 
             tabela = ajustar_woe(bin_dev, df_dev["y"])
-            # datasets sintéticos do lab já nomeiam a variável crua com sufixo
-            # "_woe" por convenção (ver docs/algoritmos-originais/pedro-wise-resumo.md)
-            # — não duplicar o sufixo nesse caso, senão vira "xa_woe_woe".
-            nome_woe = coluna if coluna.endswith("_woe") else f"{coluna}_woe"
+            nome_woe = f"{base_semantica}_woe"
             woe_dev[nome_woe] = aplicar_woe(bin_dev, tabela)
             woe_teste[nome_woe] = aplicar_woe(bin_teste, tabela)
             iv_por_variavel[coluna] = tabela.iv_total
             classificacao = classificar_iv(tabela.iv_total)
             mensagem = f"  {coluna}: IV={tabela.iv_total:.4f} ({classificacao})"
             fila.put({"tipo": "log", "mensagem": mensagem})
+
+            if gerar_transformacoes_potencia and eh_numerica:
+                extras_dev = gerar_transformacoes_fixas(df_dev[coluna], base_semantica)
+                extras_teste = gerar_transformacoes_fixas(df_teste[coluna], base_semantica)
+                # só mantém transformações válidas (domínio ok) em dev E teste —
+                # senão a coluna existiria só de um lado.
+                for nome_extra in set(extras_dev) & set(extras_teste):
+                    serie_dev, serie_teste = extras_dev[nome_extra], extras_teste[nome_extra]
+                    if not (np.isfinite(serie_dev).all() and np.isfinite(serie_teste).all()):
+                        continue
+                    woe_dev[nome_extra] = serie_dev
+                    woe_teste[nome_extra] = serie_teste
+                    n_potencia += 1
         except (ValueError, IndexError, TypeError) as e:
             fila.put({"tipo": "log", "mensagem": f"  [pulado] {coluna}: {e}"})
+
+    if n_potencia:
+        mensagem_potencia = f"  +{n_potencia} transformações de potência (log/quad/cubo/inversas)"
+        fila.put({"tipo": "log", "mensagem": mensagem_potencia})
 
     return pd.DataFrame(woe_dev), pd.DataFrame(woe_teste), iv_por_variavel
 
 
 def _construir_e_transformar(
-    df_dev: pd.DataFrame, df_teste: pd.DataFrame, fila: queue.Queue[dict[str, Any]]
+    df_dev: pd.DataFrame,
+    df_teste: pd.DataFrame,
+    fila: queue.Queue[dict[str, Any]],
+    gerar_transformacoes_potencia: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
     """Composição construção → categorização → transformação, usada pelo
     pipeline "rodar tudo de uma vez" (`rodar_pipeline`). Os módulos também
@@ -199,7 +235,9 @@ def _construir_e_transformar(
     `teste.csv`, então não há cache para ficar desatualizado.
     """
     df_dev, df_teste, _ = _construir(df_dev, df_teste, fila)
-    return _categorizar_e_transformar(df_dev, df_teste, fila)
+    return _categorizar_e_transformar(
+        df_dev, df_teste, fila, gerar_transformacoes_potencia=gerar_transformacoes_potencia
+    )
 
 
 def rodar_construcao(dataset: str, pares_customizados: list[ParConstrucao] | None = None) -> dict[str, Any]:
@@ -218,7 +256,10 @@ def rodar_construcao(dataset: str, pares_customizados: list[ParConstrucao] | Non
 
 
 def rodar_categorizacao_transformacao(
-    dataset: str, usar_construcao: bool = True, pares_customizados: list[ParConstrucao] | None = None
+    dataset: str,
+    usar_construcao: bool = True,
+    pares_customizados: list[ParConstrucao] | None = None,
+    gerar_transformacoes_potencia: bool = True,
 ) -> dict[str, Any]:
     """Roda construção (opcional) + categorização + transformação, pra
     inspeção isolada (Fase 3 — UI modular). Não persiste nada.
@@ -227,7 +268,9 @@ def rodar_categorizacao_transformacao(
     fila: queue.Queue[dict[str, Any]] = queue.Queue()
     if usar_construcao:
         df_dev, df_teste, _ = _construir(df_dev, df_teste, fila, pares_customizados=pares_customizados)
-    _, _, iv_por_variavel = _categorizar_e_transformar(df_dev, df_teste, fila)
+    _, _, iv_por_variavel = _categorizar_e_transformar(
+        df_dev, df_teste, fila, gerar_transformacoes_potencia=gerar_transformacoes_potencia
+    )
     iv_ordenado = sorted(iv_por_variavel.items(), key=lambda kv: kv[1], reverse=True)
     return {
         "n_variaveis": len(iv_por_variavel),
@@ -303,6 +346,7 @@ def rodar_pipeline(
     nivel3_ativado: bool = False,
     n_best_backward: int = 2,
     profundidade_maxima_nivel3: int = 2,
+    gerar_transformacoes_potencia: bool = True,
     fila: queue.Queue[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Roda o pipeline (opcionalmente construção+categorização+WOE) seguido
@@ -318,7 +362,9 @@ def rodar_pipeline(
     iv_por_variavel: dict[str, float] = {}
 
     if usar_pipeline_completo:
-        df_dev, df_teste, iv_por_variavel = _construir_e_transformar(df_dev, df_teste, fila)
+        df_dev, df_teste, iv_por_variavel = _construir_e_transformar(
+            df_dev, df_teste, fila, gerar_transformacoes_potencia=gerar_transformacoes_potencia
+        )
     else:
         fila.put({"tipo": "etapa", "mensagem": "Rodando direto nas variáveis originais (sem pipeline)"})
 
@@ -377,10 +423,21 @@ def rodar_pipeline(
         prob_teste = estado_final.model.predict_proba(df_teste[variaveis])
         auc = float(roc_auc_score(df_teste["y"], prob_teste))
         tabela_decis = _tabela_decis(df_teste["y"], prob_teste)
+        # FittedModel (Protocol) só garante variables/predict_proba — genérico
+        # de propósito, pra caber estimadores futuros sem coeficiente linear
+        # (sklearn/boosting). LogisticGLM (o único estimador hoje) tem
+        # coeficientes(); resultado_final.model é sempre um LogisticGLM aqui.
+        coeficientes = estado_final.model.coeficientes()  # type: ignore[attr-defined]
+        intercepto = coeficientes.get("const", 0.0)
+        coeficientes_variaveis = [
+            {"variavel": v, "coeficiente": coeficientes.get(v, 0.0)} for v in variaveis
+        ]
     else:
         ks_teste = 0.0
         auc = 0.5
         tabela_decis = []
+        intercepto = 0.0
+        coeficientes_variaveis = []
 
     iv_ordenado = sorted(iv_por_variavel.items(), key=lambda kv: kv[1], reverse=True)[:10]
 
@@ -393,5 +450,7 @@ def rodar_pipeline(
         "n_eventos": len(trace.eventos),
         "top_iv": [{"variavel": v, "iv": iv} for v, iv in iv_ordenado],
         "tabela_decis": tabela_decis,
+        "intercepto": intercepto,
+        "coeficientes": coeficientes_variaveis,
         "tempo_segundos": round(time.perf_counter() - t0, 1),
     }

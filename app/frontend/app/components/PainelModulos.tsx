@@ -19,6 +19,23 @@ function rotuloPar(p: ParConstrucao): string {
   return p.nome || `${p.numerador} ${simbolo} ${p.denominador}`;
 }
 
+const MAXIMO_COLUNAS_PARA_AUTO_GERAR = 12;
+
+/** Todas as razões possíveis entre pares de colunas NUMÉRICAS (nunca
+ * categóricas/data, senão a divisão quebra) — cada par uma vez só (A/B, não
+ * A/B e B/A). Capado em `MAXIMO_COLUNAS_PARA_AUTO_GERAR` colunas pra não
+ * explodir o número de candidatas que o Pedro_Wise depois precisa avaliar.
+ */
+function gerarTodasCombinacoes(colunasNumericas: string[]): ParConstrucao[] {
+  const pares: ParConstrucao[] = [];
+  for (let i = 0; i < colunasNumericas.length; i++) {
+    for (let j = i + 1; j < colunasNumericas.length; j++) {
+      pares.push({ numerador: colunasNumericas[i], denominador: colunasNumericas[j], operacao: "razao" });
+    }
+  }
+  return pares;
+}
+
 function FormularioParConstrucao({
   colunas,
   aoAdicionar,
@@ -160,7 +177,7 @@ function Modulo({
 }
 
 export default function PainelModulos({ dataset }: Props) {
-  const [colunas, setColunas] = useState<string[]>([]);
+  const [colunasNumericas, setColunasNumericas] = useState<string[]>([]);
   const [paresCustomizados, setParesCustomizados] = useState<ParConstrucao[]>([]);
 
   const [rodandoConstrucao, setRodandoConstrucao] = useState(false);
@@ -168,6 +185,7 @@ export default function PainelModulos({ dataset }: Props) {
   const [erroConstrucao, setErroConstrucao] = useState<string | null>(null);
 
   const [usarConstrucao, setUsarConstrucao] = useState(true);
+  const [gerarTransformacoesPotencia, setGerarTransformacoesPotencia] = useState(true);
   const [rodandoCategorizacao, setRodandoCategorizacao] = useState(false);
   const [resultadoCategorizacao, setResultadoCategorizacao] = useState<ResultadoCategorizacaoTransformacao | null>(
     null,
@@ -176,12 +194,16 @@ export default function PainelModulos({ dataset }: Props) {
 
   useEffect(() => {
     buscarPreviewDataset(dataset)
-      .then((p) => setColunas(p.colunas.filter((c) => c !== "y")))
-      .catch(() => setColunas([]));
+      .then((p) => setColunasNumericas(p.colunas_numericas))
+      .catch(() => setColunasNumericas([]));
   }, [dataset]);
 
   function removerPar(indice: number) {
     setParesCustomizados((atual) => atual.filter((_, i) => i !== indice));
+  }
+
+  function aoGerarAutomaticamente() {
+    setParesCustomizados(gerarTodasCombinacoes(colunasNumericas));
   }
 
   async function aoRodarConstrucao() {
@@ -201,7 +223,12 @@ export default function PainelModulos({ dataset }: Props) {
     setErroCategorizacao(null);
     try {
       setResultadoCategorizacao(
-        await rodarCategorizacaoTransformacao(dataset, usarConstrucao, paresCustomizados),
+        await rodarCategorizacaoTransformacao(
+          dataset,
+          usarConstrucao,
+          paresCustomizados,
+          gerarTransformacoesPotencia,
+        ),
       );
     } catch (e) {
       setErroCategorizacao(String(e));
@@ -234,9 +261,24 @@ export default function PainelModulos({ dataset }: Props) {
           acoes={botao(rodandoConstrucao, () => void aoRodarConstrucao(), "Rodar")}
         >
           <FormularioParConstrucao
-            colunas={colunas}
+            colunas={colunasNumericas}
             aoAdicionar={(par) => setParesCustomizados((atual) => [...atual, par])}
           />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={aoGerarAutomaticamente}
+              disabled={colunasNumericas.length < 2 || colunasNumericas.length > MAXIMO_COLUNAS_PARA_AUTO_GERAR}
+              className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-700 hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Gerar automaticamente (todas as razões entre colunas numéricas)
+            </button>
+            {colunasNumericas.length > MAXIMO_COLUNAS_PARA_AUTO_GERAR && (
+              <span className="text-[11px] text-slate-600">
+                {colunasNumericas.length} colunas numéricas — acima do limite de{" "}
+                {MAXIMO_COLUNAS_PARA_AUTO_GERAR} pra gerar tudo de uma vez, monte manualmente acima.
+              </span>
+            )}
+          </div>
           {paresCustomizados.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {paresCustomizados.map((par, i) => (
@@ -300,6 +342,15 @@ export default function PainelModulos({ dataset }: Props) {
               className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500"
             />
             incluir variáveis construídas (etapa 1)
+          </label>
+          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={gerarTransformacoesPotencia}
+              onChange={(e) => setGerarTransformacoesPotencia(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500"
+            />
+            gerar log/raiz/quadrática/cúbica/inversas por variável numérica
           </label>
           {erroCategorizacao && <p className="text-xs text-red-400">{erroCategorizacao}</p>}
           {!resultadoCategorizacao && !erroCategorizacao && (

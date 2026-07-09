@@ -39,6 +39,20 @@ export default function PainelConfig({ config, aoMudar, rodando }: Props) {
           Desligado: Pedro_Wise direto nas variáveis originais (baseline).
         </p>
 
+        <label className="mt-3 flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={config.gerar_transformacoes_potencia}
+            onChange={(e) => atualizar("gerar_transformacoes_potencia", e.target.checked)}
+            disabled={rodando || !config.usar_pipeline_completo}
+            className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+          />
+          log/raiz/quad/cubo/inversas por variável
+        </label>
+        <p className="mt-1 text-xs text-slate-500">
+          Candidatas extras pra transformação simples trocar pela versão WOE, quando melhora o score.
+        </p>
+
         <div className="mt-4">
           <span className="mb-2 block text-xs text-slate-500">Critério de parada</span>
           <div className="flex flex-col gap-1.5">

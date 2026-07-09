@@ -12,6 +12,7 @@ from transformacao.potencia import (
     ajustar_yeo_johnson,
     aplicar_potencia,
 )
+from transformacao.potencias_fixas import gerar_transformacoes_fixas
 from transformacao.woe import TabelaWOE, ajustar_woe, aplicar_woe, classificar_iv
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "aplicar_potencia",
     "aplicar_woe",
     "classificar_iv",
+    "gerar_transformacoes_fixas",
 ]

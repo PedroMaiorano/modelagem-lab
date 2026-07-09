@@ -22,6 +22,13 @@ class _FittedGLM:
         X_design = X_design.reindex(columns=self._result.model.exog_names, fill_value=0.0)
         return np.asarray(self._result.predict(X_design))
 
+    def coeficientes(self) -> dict[str, float]:
+        """Coeficientes ajustados, incluindo o intercepto sob a chave
+        `"const"` (nome que `statsmodels` usa pra ele) — pra exibir a
+        fórmula do modelo final na interface.
+        """
+        return {str(nome): float(valor) for nome, valor in self._result.params.items()}
+
 
 class LogisticGLM:
     """GLM binomial (logística) via statsmodels — equivalente a `glm(y ~ ., family=binomial)`."""

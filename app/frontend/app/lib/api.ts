@@ -24,6 +24,7 @@ export interface ConfigPipeline {
   nivel3_ativado: boolean;
   n_best_backward: number;
   profundidade_maxima_nivel3: number;
+  gerar_transformacoes_potencia: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +141,7 @@ export async function rodarCategorizacaoTransformacao(
   dataset: string,
   usarConstrucao: boolean,
   paresCustomizados: ParConstrucao[] = [],
+  gerarTransformacoesPotencia: boolean = true,
 ): Promise<ResultadoCategorizacaoTransformacao> {
   const resp = await fetch(`${URL_API}/api/modulo/categorizacao-transformacao`, {
     method: "POST",
@@ -148,6 +150,7 @@ export async function rodarCategorizacaoTransformacao(
       dataset,
       usar_construcao: usarConstrucao,
       pares_customizados: paresCustomizados,
+      gerar_transformacoes_potencia: gerarTransformacoesPotencia,
     }),
   });
   if (!resp.ok) throw new Error(`Falha ao rodar categorização + transformação (${resp.status})`);
@@ -198,6 +201,11 @@ export interface FaixaDecil {
   ks_acumulado: number;
 }
 
+export interface Coeficiente {
+  variavel: string;
+  coeficiente: number;
+}
+
 export interface EventoResultado {
   tipo: "resultado";
   variaveis: string[];
@@ -207,6 +215,8 @@ export interface EventoResultado {
   n_eventos: number;
   top_iv: ItemIV[];
   tabela_decis: FaixaDecil[];
+  intercepto: number;
+  coeficientes: Coeficiente[];
   tempo_segundos: number;
 }
 
@@ -220,6 +230,7 @@ export async function buscarDatasets(): Promise<string[]> {
 
 export interface PreviewDataset {
   colunas: string[];
+  colunas_numericas: string[];
   n_dev: number;
   n_teste: number;
   amostra: Record<string, unknown>[];

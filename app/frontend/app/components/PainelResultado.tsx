@@ -29,8 +29,8 @@ function BarraIV({ variavel, iv, maximo }: { variavel: string; iv: number; maxim
 }
 
 const LARGURA = 560;
-const ALTURA = 200;
-const MARGEM = { topo: 10, base: 24, esquerda: 30, direita: 10 };
+const ALTURA = 220;
+const MARGEM = { topo: 12, base: 34, esquerda: 36, direita: 12 };
 
 /** Curva KS: % acumulado de eventos vs. não-eventos por faixa de score,
  * com a maior distância entre as duas curvas marcada (é o próprio KS). Mais
@@ -54,15 +54,19 @@ function GraficoKS({ tabela }: { tabela: FaixaDecil[] }) {
   return (
     <svg viewBox={`0 0 ${LARGURA} ${ALTURA}`} className="w-full" role="img" aria-label="Curva KS acumulada">
       {[0, 0.25, 0.5, 0.75, 1].map((frac) => (
-        <line
-          key={frac}
-          x1={MARGEM.esquerda}
-          x2={LARGURA - MARGEM.direita}
-          y1={y(frac)}
-          y2={y(frac)}
-          stroke="rgb(30 41 59 / 0.6)"
-          strokeWidth={1}
-        />
+        <g key={frac}>
+          <line
+            x1={MARGEM.esquerda}
+            x2={LARGURA - MARGEM.direita}
+            y1={y(frac)}
+            y2={y(frac)}
+            stroke="rgb(30 41 59 / 0.6)"
+            strokeWidth={1}
+          />
+          <text x={MARGEM.esquerda - 6} y={y(frac) + 3} textAnchor="end" className="fill-slate-500" fontSize={10}>
+            {Math.round(frac * 100)}%
+          </text>
+        </g>
       ))}
       <line
         x1={x(indiceMaxKS)}
@@ -75,11 +79,26 @@ function GraficoKS({ tabela }: { tabela: FaixaDecil[] }) {
       />
       <polyline points={pontosEventos} fill="none" stroke="rgb(16 185 129)" strokeWidth={2} />
       <polyline points={pontosNaoEventos} fill="none" stroke="rgb(100 116 139)" strokeWidth={2} />
-      <text x={MARGEM.esquerda} y={12} className="fill-slate-500" fontSize={10}>
-        100%
-      </text>
-      <text x={MARGEM.esquerda} y={ALTURA - MARGEM.base + 4} className="fill-slate-500" fontSize={10}>
-        0%
+      {tabela.map((f, i) => (
+        <text
+          key={f.faixa}
+          x={x(i)}
+          y={ALTURA - MARGEM.base + 16}
+          textAnchor="middle"
+          className="fill-slate-500"
+          fontSize={10}
+        >
+          {f.faixa}
+        </text>
+      ))}
+      <text
+        x={(MARGEM.esquerda + LARGURA - MARGEM.direita) / 2}
+        y={ALTURA - 6}
+        textAnchor="middle"
+        className="fill-slate-600"
+        fontSize={10}
+      >
+        faixa de score (decil, 1 = maior risco)
       </text>
       <text
         x={x(indiceMaxKS) + 4}
@@ -93,14 +112,45 @@ function GraficoKS({ tabela }: { tabela: FaixaDecil[] }) {
   );
 }
 
+/** Taxa de evento por decil de score — as faixas dividem o teste em ~10
+ * grupos de tamanho igual (não 10% fixo se `n` não for múltiplo de 10; a
+ * última faixa absorve o resto), ordenados do maior score (mais risco)
+ * pro menor. `n` e a taxa exata aparecem no tooltip nativo (passe o mouse). */
 function GraficoTaxaEvento({ tabela }: { tabela: FaixaDecil[] }) {
   const larguraUtil = LARGURA - MARGEM.esquerda - MARGEM.direita;
   const alturaUtil = ALTURA - MARGEM.topo - MARGEM.base;
   const maximo = Math.max(...tabela.map((f) => f.taxa_evento), 0.01);
   const larguraBarra = (larguraUtil / tabela.length) * 0.7;
+  const y = (taxa: number) => MARGEM.topo + (1 - taxa / maximo) * alturaUtil;
 
   return (
-    <svg viewBox={`0 0 ${LARGURA} ${ALTURA}`} className="w-full" role="img" aria-label="Taxa de evento por faixa">
+    <svg
+      viewBox={`0 0 ${LARGURA} ${ALTURA}`}
+      className="w-full"
+      role="img"
+      aria-label="Taxa de evento por faixa de score"
+    >
+      {[0, 0.5, 1].map((frac) => (
+        <g key={frac}>
+          <line
+            x1={MARGEM.esquerda}
+            x2={LARGURA - MARGEM.direita}
+            y1={y(frac * maximo)}
+            y2={y(frac * maximo)}
+            stroke="rgb(30 41 59 / 0.6)"
+            strokeWidth={1}
+          />
+          <text
+            x={MARGEM.esquerda - 6}
+            y={y(frac * maximo) + 3}
+            textAnchor="end"
+            className="fill-slate-500"
+            fontSize={10}
+          >
+            {(frac * maximo * 100).toFixed(0)}%
+          </text>
+        </g>
+      ))}
       {tabela.map((f, i) => {
         const alturaBarra = (f.taxa_evento / maximo) * alturaUtil;
         const xCentro = MARGEM.esquerda + ((i + 0.5) / tabela.length) * larguraUtil;
@@ -110,13 +160,26 @@ function GraficoTaxaEvento({ tabela }: { tabela: FaixaDecil[] }) {
               x={xCentro - larguraBarra / 2}
               y={MARGEM.topo + alturaUtil - alturaBarra}
               width={larguraBarra}
-              height={alturaBarra}
+              height={Math.max(1, alturaBarra)}
               rx={3}
               className="fill-sky-600"
-            />
+            >
+              <title>
+                faixa {f.faixa} · n={f.n} · taxa de evento={(f.taxa_evento * 100).toFixed(1)}%
+              </title>
+            </rect>
             <text
               x={xCentro}
-              y={ALTURA - MARGEM.base + 14}
+              y={MARGEM.topo + alturaUtil - alturaBarra - 4}
+              textAnchor="middle"
+              className="fill-slate-400"
+              fontSize={9}
+            >
+              {(f.taxa_evento * 100).toFixed(0)}%
+            </text>
+            <text
+              x={xCentro}
+              y={ALTURA - MARGEM.base + 16}
               textAnchor="middle"
               className="fill-slate-500"
               fontSize={10}
@@ -126,7 +189,61 @@ function GraficoTaxaEvento({ tabela }: { tabela: FaixaDecil[] }) {
           </g>
         );
       })}
+      <text
+        x={(MARGEM.esquerda + LARGURA - MARGEM.direita) / 2}
+        y={ALTURA - 6}
+        textAnchor="middle"
+        className="fill-slate-600"
+        fontSize={10}
+      >
+        faixa de score (decil, ~{tabela[0]?.n ?? 0} casos cada, 1 = maior risco)
+      </text>
     </svg>
+  );
+}
+
+function Formula({ resultado }: { resultado: EventoResultado }) {
+  const termos = resultado.coeficientes
+    .slice()
+    .sort((a, b) => Math.abs(b.coeficiente) - Math.abs(a.coeficiente));
+
+  return (
+    <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
+      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
+        Fórmula do modelo (logit)
+      </h3>
+      <p className="mb-3 text-[11px] text-slate-600">
+        log-odds do evento = intercepto + soma dos coeficientes × variável. Ordenado por magnitude do
+        coeficiente.
+      </p>
+      <p className="mb-3 overflow-x-auto whitespace-nowrap font-mono text-xs text-slate-300">
+        logit(p) = {resultado.intercepto.toFixed(4)}
+        {termos.map((t) => (
+          <span key={t.variavel}>
+            {" "}
+            {t.coeficiente >= 0 ? "+" : "−"} {Math.abs(t.coeficiente).toFixed(4)}·{t.variavel}
+          </span>
+        ))}
+      </p>
+      <div className="flex flex-col gap-1 text-xs">
+        <div className="flex items-center gap-3 text-slate-500">
+          <div className="w-40 shrink-0">variável</div>
+          <div className="flex-1 text-right">coeficiente</div>
+        </div>
+        <div className="flex items-center gap-3 border-t border-slate-800 pt-1 text-slate-300">
+          <div className="w-40 shrink-0">intercepto</div>
+          <div className="flex-1 text-right tabular-nums">{resultado.intercepto.toFixed(4)}</div>
+        </div>
+        {termos.map((t) => (
+          <div key={t.variavel} className="flex items-center gap-3 text-slate-300">
+            <div className="w-40 shrink-0 truncate" title={t.variavel}>
+              {t.variavel}
+            </div>
+            <div className="flex-1 text-right tabular-nums">{t.coeficiente.toFixed(4)}</div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -158,6 +275,8 @@ export default function PainelResultado({ resultado }: { resultado: EventoResult
         </div>
       </div>
 
+      {resultado.coeficientes.length > 0 && <Formula resultado={resultado} />}
+
       {resultado.tabela_decis.length > 1 && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
@@ -166,7 +285,7 @@ export default function PainelResultado({ resultado }: { resultado: EventoResult
             </h3>
             <p className="mb-2 text-[11px] text-slate-600">
               % acumulado de <span className="text-emerald-400">eventos</span> vs.{" "}
-              <span className="text-slate-400">não-eventos</span> por faixa de score (maior risco → menor).
+              <span className="text-slate-400">não-eventos</span> por faixa de score.
             </p>
             <GraficoKS tabela={resultado.tabela_decis} />
           </div>
@@ -175,7 +294,7 @@ export default function PainelResultado({ resultado }: { resultado: EventoResult
               Taxa de evento por faixa
             </h3>
             <p className="mb-2 text-[11px] text-slate-600">
-              10 faixas de score (1 = maior risco). Faixas decrescentes indicam boa discriminação.
+              Decis de score — passe o mouse numa barra pra ver n e taxa exata.
             </p>
             <GraficoTaxaEvento tabela={resultado.tabela_decis} />
           </div>

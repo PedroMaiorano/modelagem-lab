@@ -102,6 +102,7 @@ class ConfigCategorizacaoTransformacao(BaseModel):
     dataset: str
     usar_construcao: bool = True
     pares_customizados: list[ParConstrucaoAPI] = []
+    gerar_transformacoes_potencia: bool = True
 
 
 @app.post("/api/modulo/categorizacao-transformacao")
@@ -110,7 +111,10 @@ def rota_rodar_categorizacao_transformacao(config: ConfigCategorizacaoTransforma
         raise HTTPException(status_code=404, detail=f"Dataset '{config.dataset}' não encontrado")
     pares = [_par_construcao(p) for p in config.pares_customizados]
     return rodar_categorizacao_transformacao(
-        config.dataset, usar_construcao=config.usar_construcao, pares_customizados=pares
+        config.dataset,
+        usar_construcao=config.usar_construcao,
+        pares_customizados=pares,
+        gerar_transformacoes_potencia=config.gerar_transformacoes_potencia,
     )
 
 
@@ -255,6 +259,7 @@ class ConfigPipeline(BaseModel):
     nivel3_ativado: bool = False
     n_best_backward: int = 2
     profundidade_maxima_nivel3: int = 2
+    gerar_transformacoes_potencia: bool = True
 
 
 def _worker(config: ConfigPipeline, fila: queue.Queue[dict[str, Any] | None]) -> None:
@@ -278,6 +283,7 @@ def _worker(config: ConfigPipeline, fila: queue.Queue[dict[str, Any] | None]) ->
             nivel3_ativado=config.nivel3_ativado,
             n_best_backward=config.n_best_backward,
             profundidade_maxima_nivel3=config.profundidade_maxima_nivel3,
+            gerar_transformacoes_potencia=config.gerar_transformacoes_potencia,
             fila=fila,  # type: ignore[arg-type]
         )
         fila.put(resultado)
