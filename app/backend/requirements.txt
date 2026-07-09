@@ -1,0 +1,7 @@
+# Dependências do backend (pilar interface v2), separadas do core.
+# O core em si é importado diretamente do repo (ver logica.py), não instalado
+# como pacote — mesmas dependências de python/ (statsmodels, scikit-learn,
+# scipy, pandas, numpy) também precisam estar disponíveis.
+fastapi>=0.139
+uvicorn[standard]>=0.50
+sse-starlette>=3.4

@@ -42,5 +42,6 @@ Wiki de técnicas documentadas — populada pelo `literature-scout`. Ver [README
 
 ## Planos (`docs/planos/`)
 - [modelagem-lab-config](planos/modelagem-lab-config.md) — decisões de arquitetura da configuração Claude Code deste lab.
-- [interface-streamlit](planos/interface-streamlit.md) — decisão de framework e escopo do pilar 3 (dashboard em `app/`).
+- [interface-streamlit](planos/interface-streamlit.md) — decisão de framework e escopo da interface v1 (dashboard Streamlit em `app/`).
 - [expansao-modulos-2026-07-08](planos/expansao-modulos-2026-07-08.md) — decisão de expandir de "3 pilares" para 4 módulos de modelagem (categorização/transformação/construção/treinamento) + pedido de interface melhor (pós-Streamlit).
+- [interface-v2-fastapi-react](planos/interface-v2-fastapi-react.md) — interface v2 (FastAPI + Next.js/Tailwind), progresso em tempo real via SSE sem tocar o core. Documenta 2 bugs reais encontrados e corrigidos (double-suffix `_woe`, separador de frame SSE `\r\n\r\n` vs `\n\n`) — só pegos testando o parsing de verdade contra o backend rodando.

@@ -1,0 +1,205 @@
+"""Camada de lógica do backend FastAPI — só consome `python/{pedro_wise,
+categorizacao,transformacao,construcao}` (o core), nunca reimplementa
+seleção/binning/WOE aqui. Mesma regra do `app/logica.py` (Streamlit v1).
+
+Progresso em tempo real (sem tocar o core): o `pedro_wise` já loga cada
+atualização aceita via `logger.info(...)` em todos os módulos (`selection`,
+`level2`, `level3`, `pipeline`, `shadow_probing`). `CapturadorProgresso`
+anexa um `logging.Handler` ao logger pai `pedro_wise` durante a execução e
+publica cada registro numa fila — dá streaming real sem precisar modificar
+uma única linha do core já testado.
+"""
+
+from __future__ import annotations
+
+import logging
+import queue
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+_RAIZ = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_RAIZ / "python"))
+
+import pandas as pd  # noqa: E402
+from categorizacao import aplicar_bins, bins_monotonicos  # noqa: E402
+from construcao import construir_razoes_em_lote  # noqa: E402
+from pedro_wise.estimators import LogisticGLM  # noqa: E402
+from pedro_wise.metrics import KSGaussianMetric  # noqa: E402
+from pedro_wise.pipeline import run_pedro_wise  # noqa: E402
+from pedro_wise.types import Level1Config, Level2Config, SelectionState, ShadowProbingConfig  # noqa: E402
+from sklearn.metrics import roc_auc_score  # noqa: E402
+from transformacao import ajustar_woe, aplicar_woe, classificar_iv  # noqa: E402
+
+DIR_DADOS = _RAIZ / "data"
+
+# Razões de negócio padrão para o dataset credito_real — mesmas do script de
+# experimento (scripts/pipeline_completo_credito_real.py). Só aplicadas se
+# as colunas existirem no dataset escolhido.
+PARES_RAZAO_CREDITO_REAL = [(f"PAYAMT{i}", f"BILLAMT{i}", f"proppaga{i}") for i in range(1, 7)]
+
+
+class CapturadorProgresso(logging.Handler):
+    """Handler que publica cada log record numa fila thread-safe, como
+    mensagem de progresso `{"tipo": "log", "mensagem": ...}`.
+    """
+
+    def __init__(self, fila: queue.Queue[dict[str, Any]]) -> None:
+        super().__init__(level=logging.INFO)
+        self._fila = fila
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._fila.put({"tipo": "log", "mensagem": self.format(record)})
+
+
+def listar_datasets() -> list[str]:
+    if not DIR_DADOS.exists():
+        return []
+
+    def _tem_dev_e_teste(p: Path) -> bool:
+        return p.is_dir() and (p / "dev.csv").exists() and (p / "teste.csv").exists()
+
+    return sorted(p.name for p in DIR_DADOS.iterdir() if _tem_dev_e_teste(p))
+
+
+def carregar_dataset(nome: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    pasta = DIR_DADOS / nome
+    return pd.read_csv(pasta / "dev.csv"), pd.read_csv(pasta / "teste.csv")
+
+
+def preview_dataset(nome: str, n: int = 5) -> dict[str, Any]:
+    df_dev, df_teste = carregar_dataset(nome)
+    return {
+        "colunas": list(df_dev.columns),
+        "n_dev": len(df_dev),
+        "n_teste": len(df_teste),
+        "amostra": df_dev.head(n).to_dict(orient="records"),
+    }
+
+
+def _construir_e_transformar(
+    df_dev: pd.DataFrame, df_teste: pd.DataFrame, fila: queue.Queue[dict[str, Any]]
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
+    """Construção (razões, se aplicável) + categorização (bins monotônicos)
+    + transformação (WOE) — mesma lógica de `scripts/pipeline_completo_credito_real.py`,
+    reescrita aqui para publicar progresso na fila a cada variável processada.
+    """
+    pares_aplicaveis = [
+        (num, den, nome)
+        for num, den, nome in PARES_RAZAO_CREDITO_REAL
+        if num in df_dev.columns and den in df_dev.columns
+    ]
+    if pares_aplicaveis:
+        fila.put({"tipo": "etapa", "mensagem": f"Construção: {len(pares_aplicaveis)} razões novas"})
+        df_dev = pd.concat([df_dev, construir_razoes_em_lote(df_dev, pares_aplicaveis)], axis=1)
+        df_teste = pd.concat([df_teste, construir_razoes_em_lote(df_teste, pares_aplicaveis)], axis=1)
+
+    colunas_candidatas = [c for c in df_dev.columns if c != "y"]
+    fila.put({"tipo": "etapa", "mensagem": f"Categorização + WOE: {len(colunas_candidatas)} candidatas"})
+
+    woe_dev: dict[str, Any] = {"y": df_dev["y"]}
+    woe_teste: dict[str, Any] = {"y": df_teste["y"]}
+    iv_por_variavel: dict[str, float] = {}
+
+    for coluna in colunas_candidatas:
+        try:
+            resultado_bin = bins_monotonicos(df_dev[coluna], df_dev["y"], n_bins_inicial=15)
+            if len(resultado_bin.edges) < 3:
+                continue
+            bin_dev = aplicar_bins(df_dev[coluna], resultado_bin.edges)
+            bin_teste = aplicar_bins(df_teste[coluna], resultado_bin.edges)
+
+            tabela = ajustar_woe(bin_dev, df_dev["y"])
+            # datasets sintéticos do lab já nomeiam a variável crua com sufixo
+            # "_woe" por convenção (ver docs/algoritmos-originais/pedro-wise-resumo.md)
+            # — não duplicar o sufixo nesse caso, senão vira "xa_woe_woe".
+            nome_woe = coluna if coluna.endswith("_woe") else f"{coluna}_woe"
+            woe_dev[nome_woe] = aplicar_woe(bin_dev, tabela)
+            woe_teste[nome_woe] = aplicar_woe(bin_teste, tabela)
+            iv_por_variavel[coluna] = tabela.iv_total
+            classificacao = classificar_iv(tabela.iv_total)
+            mensagem = f"  {coluna}: IV={tabela.iv_total:.4f} ({classificacao})"
+            fila.put({"tipo": "log", "mensagem": mensagem})
+        except (ValueError, IndexError) as e:
+            fila.put({"tipo": "log", "mensagem": f"  [pulado] {coluna}: {e}"})
+
+    return pd.DataFrame(woe_dev), pd.DataFrame(woe_teste), iv_por_variavel
+
+
+def rodar_pipeline(
+    dataset: str,
+    *,
+    usar_pipeline_completo: bool = True,
+    criterio: str = "teste",
+    shadow_probing: bool = False,
+    n_best_duplo: int = 5,
+    n_best_triplo_1: int = 3,
+    n_best_triplo_2: int = 3,
+    fila: queue.Queue[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Roda o pipeline (opcionalmente construção+categorização+WOE) seguido
+    de `run_pedro_wise`, publicando progresso em `fila` em tempo real via
+    `CapturadorProgresso`. Retorna o resultado final (também colocado na
+    fila como último item, tipo "resultado", pelo chamador).
+    """
+    fila = fila if fila is not None else queue.Queue()
+    t0 = time.perf_counter()
+
+    df_dev, df_teste = carregar_dataset(dataset)
+    iv_por_variavel: dict[str, float] = {}
+
+    if usar_pipeline_completo:
+        df_dev, df_teste, iv_por_variavel = _construir_e_transformar(df_dev, df_teste, fila)
+    else:
+        fila.put({"tipo": "etapa", "mensagem": "Rodando direto nas variáveis originais (sem pipeline)"})
+
+    fila.put({"tipo": "etapa", "mensagem": "Treinamento: Pedro_Wise"})
+
+    logger_pedro_wise = logging.getLogger("pedro_wise")
+    handler = CapturadorProgresso(fila)
+    nivel_anterior = logger_pedro_wise.level
+    logger_pedro_wise.addHandler(handler)
+    logger_pedro_wise.setLevel(logging.INFO)
+    try:
+        estimator = LogisticGLM()
+        metric = KSGaussianMetric(criterio=criterio)  # type: ignore[arg-type]
+        modelo_nulo = estimator.fit(df_dev[[]], df_dev["y"])
+        score_nulo = metric(modelo_nulo, df_dev[[]], df_dev["y"], df_teste[[]], df_teste["y"])
+        estado_inicial = SelectionState(variables=(), model=modelo_nulo, score=score_nulo)
+
+        config1 = Level1Config(shadow_probing=ShadowProbingConfig(ativado=shadow_probing, semente=7))
+        config2 = Level2Config(
+            n_best_duplo=n_best_duplo, n_best_triplo_1=n_best_triplo_1, n_best_triplo_2=n_best_triplo_2
+        )
+        estado_final, trace = run_pedro_wise(
+            estimator, metric, df_dev, df_teste, estado_inicial, config1, config2
+        )
+    finally:
+        logger_pedro_wise.removeHandler(handler)
+        logger_pedro_wise.setLevel(nivel_anterior)
+
+    variaveis = list(estado_final.variables)
+    metric_teste = KSGaussianMetric(criterio="teste")
+    if variaveis:
+        ks_teste = metric_teste(
+            estado_final.model, df_dev[variaveis], df_dev["y"], df_teste[variaveis], df_teste["y"]
+        )
+        prob_teste = estado_final.model.predict_proba(df_teste[variaveis])
+        auc = float(roc_auc_score(df_teste["y"], prob_teste))
+    else:
+        ks_teste = 0.0
+        auc = 0.5
+
+    iv_ordenado = sorted(iv_por_variavel.items(), key=lambda kv: kv[1], reverse=True)[:10]
+
+    return {
+        "tipo": "resultado",
+        "variaveis": variaveis,
+        "ks_dev": estado_final.score if criterio == "dev" else None,
+        "ks_teste": ks_teste,
+        "auc": auc,
+        "n_eventos": len(trace.eventos),
+        "top_iv": [{"variavel": v, "iv": iv} for v, iv in iv_ordenado],
+        "tempo_segundos": round(time.perf_counter() - t0, 1),
+    }

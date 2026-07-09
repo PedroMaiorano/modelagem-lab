@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+/* Tema único (escuro), sem alternância — ferramenta interna, não produto
+   com preferência de usuário a respeitar. Cor de fundo/texto vem das
+   classes Tailwind em app/layout.tsx (bg-slate-950/text-slate-100). */
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}

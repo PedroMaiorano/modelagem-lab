@@ -12,7 +12,7 @@ construcao/  ──►  categorizacao/  ──►  transformacao/  ──►  pe
 ```
 
 1. **Categorização** (`python/categorizacao/`) — binning: largura/frequência igual, árvore, monotônico (aproximação do OptBinning). ✅ 7 testes.
-2. **Transformação** (`python/transformacao/`) — WOE + Information Value, fit/transform anti-leakage. ✅ 11 testes. Fecha a lacuna histórica: `_woe` era só nome, agora é implementação.
+2. **Transformação** (`python/transformacao/`) — WOE + Information Value + Box-Cox/Yeo-Johnson, fit/transform anti-leakage. ✅ 16 testes. Fecha a lacuna histórica: `_woe` era só nome, agora é implementação.
 3. **Construção** (`python/construcao/`) — razões/diferenças entre variáveis (escopo v1 deliberadamente mínimo). ✅ 5 testes.
 4. **Treinamento** (`python/pedro_wise/`) — port completo (níveis 1-3) do algoritmo Pedro_Wise (R→Python), validado contra o R original, com 3 experimentos comparativos.
 
@@ -20,19 +20,21 @@ construcao/  ──►  categorizacao/  ──►  transformacao/  ──►  pe
 
 ## Pilares de suporte
 - **Scraping de literatura acadêmica aberta** (arXiv, Semantic Scholar, OpenAlex, CrossRef, Europe PMC/PubMed) — ✅ clients implementados e testados, ~58 referências catalogadas nos 4 módulos + livros.
-- **Interface** (dashboard Streamlit) — ✅ v1 funcional em `app/`. Pedido pendente do usuário: versão mais fluida/bonita — ver `docs/planos/expansao-modulos-2026-07-08.md`.
+- **Interface** — duas versões, ambas em `app/`:
+  - v1: dashboard Streamlit (`app/streamlit_app.py`) — exploratório, simples.
+  - v2: FastAPI + Next.js/Tailwind (`app/backend/`, `app/frontend/`) — progresso em tempo real via SSE, UI mais fluida. Ver [`docs/planos/interface-v2-fastapi-react.md`](docs/planos/interface-v2-fastapi-react.md).
 
 ## Estrutura
 ```
-docs/         base de conhecimento (SOTA tracker, APIs, literatura por módulo, experimentos, livros)
-python/       categorizacao/ transformacao/ construcao/ pedro_wise/ — os 4 módulos
-app/          dashboard Streamlit — consome python/*, não reimplementa
-r/            protótipos/originais em R
-scraping/     clients de APIs abertas (arXiv, Semantic Scholar, OpenAlex, CrossRef, Europe PMC)
-scripts/      benchmark, validação R↔Python, experimentos comparativos, geração de datasets, pipeline completo
-tests/        pytest (63 testes)
-notebooks/    exploração ad-hoc
-.claude/      configuração Claude Code (agents, skills, hooks)
+docs/          base de conhecimento (SOTA tracker, APIs, literatura por módulo, experimentos, livros)
+python/        categorizacao/ transformacao/ construcao/ pedro_wise/ — os 4 módulos
+app/           streamlit_app.py (v1) + backend/ e frontend/ (v2) — consomem python/*, não reimplementam
+r/             protótipos/originais em R
+scraping/      clients de APIs abertas (arXiv, Semantic Scholar, OpenAlex, CrossRef, Europe PMC)
+scripts/       benchmark, validação R↔Python, experimentos comparativos, geração de datasets, pipeline completo
+tests/         pytest (68 testes)
+notebooks/     exploração ad-hoc
+.claude/       configuração Claude Code (agents, skills, hooks)
 ```
 
 ## Começando
@@ -45,17 +47,20 @@ notebooks/    exploração ad-hoc
 - Algoritmo central (treinamento): [`docs/algoritmos-originais/pedro-wise-resumo.md`](docs/algoritmos-originais/pedro-wise-resumo.md) — inclui validação numérica contra o R original.
 - Experimentos comparativos: [`docs/experimentos/`](docs/experimentos/).
 - Datasets disponíveis: [`docs/referencias/datasets.md`](docs/referencias/datasets.md) — inclui `credito_real` (UCI, dado real).
-- Interface: [`docs/planos/interface-streamlit.md`](docs/planos/interface-streamlit.md).
+- Interface: [`docs/planos/interface-streamlit.md`](docs/planos/interface-streamlit.md) (v1) e [`docs/planos/interface-v2-fastapi-react.md`](docs/planos/interface-v2-fastapi-react.md) (v2).
 
 ## Comandos
 ```bash
-pytest tests -x -v                                                      # testes (63)
-ruff check python/ scraping/ scripts/ app/                              # lint
+pytest tests -x -v                                                      # testes (68)
+ruff check python/ scraping/ scripts/ app/backend/                      # lint
 mypy python/pedro_wise python/categorizacao python/transformacao python/construcao scraping/  # type check (strict)
 
 python scripts/pipeline_completo_credito_real.py                        # construção->categorização->WOE->treinamento
 python scraping/arxiv_client.py --query 'cat:stat.ML AND all:"variable selection"' --max 10
 python scripts/benchmark_paralelizacao.py                               # mede backend/n_jobs
 Rscript scripts/validar_port_r.R && python scripts/validar_port_python.py  # revalida port vs. R
-python -m streamlit run app/streamlit_app.py                            # dashboard (use python -m, não `streamlit` direto)
+
+python -m streamlit run app/streamlit_app.py                            # interface v1 (use python -m, não `streamlit` direto)
+python -m uvicorn main:app --reload --port 8001 --app-dir app/backend   # interface v2 — backend
+cd app/frontend && npm run dev                                          # interface v2 — frontend (outro terminal)
 ```

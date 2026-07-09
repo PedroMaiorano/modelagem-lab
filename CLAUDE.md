@@ -6,7 +6,8 @@
 > separado, compostos num pipeline — ver §7): **categorização** (binning),
 > **transformação** (WOE/encodings), **construção** (feature engineering),
 > **treinamento** (seleção de variáveis/modelos — o Pedro_Wise). Mais 2 pilares de
-> suporte: scraping de literatura acadêmica aberta, e interface (dashboard em `app/`).
+> suporte: scraping de literatura acadêmica aberta, e interface (2 versões: Streamlit
+> v1 e FastAPI+Next.js v2, ambas em `app/`, ver §6-7).
 
 ---
 
@@ -14,21 +15,19 @@
 
 ```bash
 test:      pytest tests -x -v
-lint:      ruff check python/ scraping/ scripts/ app/
+lint:      ruff check python/ scraping/ scripts/ app/backend/
 typecheck: mypy python/pedro_wise python/categorizacao python/transformacao python/construcao scraping/
 r-script:  Rscript r/<arquivo>.R
 scraper:   python scraping/arxiv_client.py --query 'cat:stat.ML AND all:"variable selection"' --max 10
 benchmark: python scripts/benchmark_paralelizacao.py
 validar:   Rscript scripts/validar_port_r.R && python scripts/validar_port_python.py
 pipeline:  python scripts/pipeline_completo_credito_real.py   # construção->categorização->WOE->treinamento
-app:       python -m streamlit run app/streamlit_app.py   # ver nota Windows em docs/planos/interface-streamlit.md
+app-v1:    python -m streamlit run app/streamlit_app.py   # ver nota Windows em docs/planos/interface-streamlit.md
+app-v2:    python -m uvicorn main:app --reload --port 8001 --app-dir app/backend  # + `cd app/frontend && npm run dev`
 ```
-> Os 4 módulos de modelagem (categorização, transformação, construção, treinamento),
-> scraping de literatura e interface (v1) estão implementados e testados (63 testes).
+> Os 4 módulos de modelagem, scraping de literatura e as 2 versões de interface
+> estão implementados e testados (68 testes Python + build/lint do frontend limpos).
 > Todo código Python novo é type-hinted, testado e lintado.
-> **Próximo pedido pendente do usuário** (explicitamente adiado até os módulos
-> estarem prontos): interface mais fluida/responsiva/bonita que o Streamlit v1
-> atual — ver `docs/planos/expansao-modulos-2026-07-08.md` antes de iniciar.
 
 ---
 
@@ -45,7 +44,7 @@ app:       python -m streamlit run app/streamlit_app.py   # ver nota Windows em 
 - Nunca fazer scraping de paywall, Sci-Hub, ou qualquer fonte fechada. Só fontes 100% abertas (arXiv, Semantic Scholar, OpenAlex, CrossRef, Europe PMC/PubMed, repositórios OA). Ver `docs/referencias/apis-fontes-abertas.md`.
 - Nunca reproduzir os anti-padrões do R original no port (ver seção 7): `rbind` em loop, refit total por teste, `cat()` como log, recursão sem memoização.
 - Nunca commitar sem pedido explícito do usuário. Nunca commitar `.env`, dados brutos pesados ou credenciais.
-- Nunca reimplementar lógica de seleção/métrica em `app/` — a interface só consome `python/pedro_wise` via `app/logica.py`.
+- Nunca reimplementar lógica de seleção/métrica/binning/WOE em `app/` (v1 ou v2) — a interface só consome os módulos `python/*` via `app/logica.py` (Streamlit) ou `app/backend/logica.py` (FastAPI).
 - Nunca comentar O QUÊ o código faz — só o PORQUÊ não-óbvio.
 
 ---
@@ -69,7 +68,7 @@ app:       python -m streamlit run app/streamlit_app.py   # ver nota Windows em 
 | `port-r-python` | skill | Workflow passo-a-passo de port R→Python (usa `algorithm-porter`). |
 | `buscar-literatura` | skill | Workflow de busca acadêmica com comandos concretos por API. |
 | `selecao-variaveis` | skill | Workflow de seleção de variáveis (forward/backward/stepwise, regularização, boosting, stability selection). |
-| `scaffold-interface` | skill | Scaffolding de Streamlit/FastAPI/Shiny. **Já ativada uma vez** (v1 do dashboard em `app/`, ver `docs/planos/interface-streamlit.md`) — reutilizar para expandir a interface, não para recomeçar do zero. |
+| `scaffold-interface` | skill | Scaffolding de Streamlit/FastAPI/Shiny. **Já ativada duas vezes** (v1 Streamlit e v2 FastAPI+Next.js, ambas em `app/`, ver `docs/planos/interface-streamlit.md` e `docs/planos/interface-v2-fastapi-react.md`) — reutilizar para expandir, não para recomeçar do zero. |
 
 ---
 
@@ -103,11 +102,14 @@ modelagem-lab/
 │   ├── categorizacao/                  # módulo CATEGORIZAÇÃO — binning (largura/frequência/árvore/monotônico)
 │   ├── transformacao/                  # módulo TRANSFORMAÇÃO — WOE/IV (fit/transform anti-leakage)
 │   └── construcao/                     # módulo CONSTRUÇÃO — razões/diferenças (escopo v1 mínimo, deliberado)
-├── app/                                # dashboard Streamlit (pilar interface) — consome python/*, não reimplementa
+├── app/
+│   ├── streamlit_app.py + logica.py    # interface v1 (Streamlit) — consome python/pedro_wise
+│   ├── backend/                        # interface v2 — FastAPI + SSE (progresso em tempo real)
+│   └── frontend/                       # interface v2 — Next.js 16 + TypeScript + Tailwind v4
 ├── r/                                  # protótipos/originais em R
 ├── scraping/                           # clients de APIs abertas (arXiv, S2, OpenAlex, CrossRef, Europe PMC)
 ├── scripts/                            # benchmark, validação R↔Python, experimentos, geração de datasets, pipeline completo
-├── tests/                              # pytest (63 testes: 4 módulos + scraping)
+├── tests/                              # pytest (68 testes: 4 módulos + scraping)
 ├── notebooks/                          # exploração ad-hoc
 └── data/papers/                        # cache imutável de metadados (gitignored)
 ```
