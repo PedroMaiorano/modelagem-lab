@@ -328,6 +328,24 @@ export default function PainelConfig({ config, aoMudar, rodando }: Props) {
           passo={0.01}
           disabled={rodando}
         />
+        <label
+          className={`mt-3 flex items-center gap-2 text-sm text-slate-200 ${
+            config.p_valor_maximo === null ? "cursor-not-allowed opacity-40" : "cursor-pointer"
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={config.comparar_sem_p_valor}
+            onChange={(e) => atualizar("comparar_sem_p_valor", e.target.checked)}
+            disabled={rodando || config.p_valor_maximo === null}
+            className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+          />
+          Rodar também sem o filtro, pra comparar
+        </label>
+        <p className="mt-1 text-xs text-slate-500">
+          Roda a busca duas vezes (com e sem a restrição) e mostra as duas nos resultados. Dobra o tempo de
+          treinamento — desmarque se só quiser a versão com o filtro.
+        </p>
       </Secao>
     </div>
   );

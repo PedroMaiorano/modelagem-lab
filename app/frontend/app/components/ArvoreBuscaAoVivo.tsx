@@ -8,8 +8,8 @@ interface Props {
   rodando: boolean;
 }
 
-const MS_POR_CANDIDATO = 90;
-const MS_PAUSA_VENCEDOR = 450;
+const MS_POR_CANDIDATO = 70;
+const MS_PAUSA_VENCEDOR = 350;
 const MS_ESPERA_PROXIMO = 150;
 const MAX_CANDIDATOS_EXIBIDOS = 12;
 const MAX_HISTORICO = 4;
@@ -96,22 +96,33 @@ function useAnimacaoArvore(estagiosTeste: EstagioTeste[]): PosicaoAnimacao {
 
 export default function ArvoreBuscaAoVivo({ estagiosTeste, rodando }: Props) {
   const pos = useAnimacaoArvore(estagiosTeste);
-  const estagio = estagiosTeste[pos.indiceEstagio];
-  const historico = estagiosTeste.slice(Math.max(0, pos.indiceEstagio - MAX_HISTORICO), pos.indiceEstagio);
 
-  if (!estagio) {
+  if (estagiosTeste.length === 0) {
     return (
-      <div className="flex h-40 items-center justify-center text-xs text-slate-600">
+      <div className="flex min-h-[11rem] items-center justify-center text-xs text-slate-600">
         {rodando ? "Aguardando primeira rodada…" : "Nenhuma busca ainda."}
       </div>
     );
   }
 
+  // A animação pode "vencer a corrida" do backend: o backend às vezes leva
+  // vários segundos reais entre uma declaração "testando N candidatas" e a
+  // próxima (nível 3, muitas trocas, etc.), então o índice animado alcança
+  // o fim do array disponível bem antes de haver mais dado. Antes disso
+  // ficava tela em branco esperando — em vez disso, trava exibindo o
+  // último estágio já resolvido (com o vencedor destacado, parado) até o
+  // próximo chegar, então sempre tem algo na tela.
+  const indiceEstagio = Math.min(pos.indiceEstagio, estagiosTeste.length - 1);
+  const aguardandoProximo = pos.indiceEstagio >= estagiosTeste.length;
+  const estagio = estagiosTeste[indiceEstagio];
+  const concluidoExibicao = pos.concluido || aguardandoProximo;
+  const historico = estagiosTeste.slice(Math.max(0, indiceEstagio - MAX_HISTORICO), indiceEstagio);
+
   const candidatosExibidos = estagio.candidatos.slice(0, MAX_CANDIDATOS_EXIBIDOS);
   const restantes = estagio.candidatos.length - candidatosExibidos.length;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-h-[11rem] flex-col justify-center gap-4">
       {historico.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-600">
           {historico.map((h, i) => (
@@ -132,7 +143,7 @@ export default function ArvoreBuscaAoVivo({ estagiosTeste, rodando }: Props) {
           {candidatosExibidos.map((_, i) => {
             const n = candidatosExibidos.length;
             const xPct = ((i + 0.5) / n) * 100;
-            const vencedorAtivo = pos.concluido && candidatosExibidos[i] === estagio.vencedor;
+            const vencedorAtivo = concluidoExibicao && candidatosExibidos[i] === estagio.vencedor;
             return (
               <line
                 key={i}
@@ -148,10 +159,10 @@ export default function ArvoreBuscaAoVivo({ estagiosTeste, rodando }: Props) {
         </svg>
 
         {candidatosExibidos.map((c, i) => {
-          const sendoTestado = !pos.concluido && i === pos.indiceCandidato;
-          const jaTestado = !pos.concluido && i < pos.indiceCandidato;
-          const eVencedor = pos.concluido && c === estagio.vencedor;
-          const perdeu = pos.concluido && c !== estagio.vencedor;
+          const sendoTestado = !concluidoExibicao && i === pos.indiceCandidato;
+          const jaTestado = !concluidoExibicao && i < pos.indiceCandidato;
+          const eVencedor = concluidoExibicao && c === estagio.vencedor;
+          const perdeu = concluidoExibicao && c !== estagio.vencedor;
 
           return (
             <div
@@ -179,7 +190,7 @@ export default function ArvoreBuscaAoVivo({ estagiosTeste, rodando }: Props) {
         )}
       </div>
 
-      {pos.concluido && (
+      {concluidoExibicao && (
         <p className="text-center text-[11px] text-slate-500">
           {estagio.vencedor ? (
             <>

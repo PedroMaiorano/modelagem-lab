@@ -454,6 +454,7 @@ def rodar_pipeline(
     limiar_iv: float | None = 0.02,
     limiar_correlacao: float | None = 0.9,
     p_valor_maximo: float | None = None,
+    comparar_sem_p_valor: bool = True,
     fila: queue.Queue[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Roda o pipeline (opcionalmente construção+categorização+WOE, opcionalmente
@@ -547,8 +548,11 @@ def rodar_pipeline(
         # "guarda uma cópia sem o p-valor" — quando o filtro está ativo,
         # roda de novo sem ele (mesmo tudo mais) só pra comparação, já que
         # a restrição pode custar KS em troca de significância garantida.
+        # `comparar_sem_p_valor` deixa isso opt-out: rodar as duas versões
+        # dobra o tempo de treinamento, e nem todo usuário quer pagar esse
+        # custo só pra ver a comparação.
         resultado_sem_filtro_pvalor: dict[str, Any] | None = None
-        if p_valor_maximo is not None:
+        if p_valor_maximo is not None and comparar_sem_p_valor:
             fila.put({"tipo": "etapa", "mensagem": "Rodando sem o filtro de p-valor, pra comparação"})
             config1_livre = replace(config1, p_valor_maximo=None)
             config2_livre = replace(config2, p_valor_maximo=None)

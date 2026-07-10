@@ -33,6 +33,9 @@ export interface ConfigPipeline {
   limiar_correlacao: number | null;
   // Restrição de significância — null desliga
   p_valor_maximo: number | null;
+  // Só relevante quando p_valor_maximo está ativo: roda a busca de novo sem
+  // o filtro, pra comparação (dobra o tempo de treinamento).
+  comparar_sem_p_valor: boolean;
 }
 
 // ---------------------------------------------------------------------------

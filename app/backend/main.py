@@ -299,6 +299,7 @@ class ConfigPipeline(BaseModel):
     limiar_correlacao: float | None = 0.9
     # Restrição de significância — None desliga (padrão)
     p_valor_maximo: float | None = None
+    comparar_sem_p_valor: bool = True
 
 
 def _worker(config: ConfigPipeline, fila: queue.Queue[dict[str, Any] | None]) -> None:
@@ -329,6 +330,7 @@ def _worker(config: ConfigPipeline, fila: queue.Queue[dict[str, Any] | None]) ->
             limiar_iv=config.limiar_iv,
             limiar_correlacao=config.limiar_correlacao,
             p_valor_maximo=config.p_valor_maximo,
+            comparar_sem_p_valor=config.comparar_sem_p_valor,
             fila=fila,  # type: ignore[arg-type]
         )
         fila.put(resultado)

@@ -45,6 +45,7 @@ const CONFIG_INICIAL: ConfigPipeline = {
   limiar_iv: 0.02,
   limiar_correlacao: 0.7,
   p_valor_maximo: null,
+  comparar_sem_p_valor: true,
 };
 
 const ABAS = [
@@ -226,7 +227,7 @@ export default function Pagina() {
                 irmã (bug real visto na tela). Com altura fixa aqui, as
                 duas colunas SEMPRE dividem o mesmo espaço, e cada uma
                 rola por dentro se precisar. */}
-            <div className="grid h-[70vh] min-h-[28rem] grid-cols-1 gap-6 xl:grid-cols-[minmax(0,42rem)_1fr]">
+            <div className="grid h-[56vh] min-h-[24rem] grid-cols-1 gap-6 xl:grid-cols-[minmax(0,42rem)_1fr]">
               <ProgressoAoVivo linhas={linhas} rodando={rodando} />
               {(linhas.length > 0 || rodando) && (
                 <div className="flex flex-col gap-6 overflow-y-auto">
