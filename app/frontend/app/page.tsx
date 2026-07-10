@@ -218,10 +218,18 @@ export default function Pagina() {
                 <ArvoreBuscaAoVivo estagiosTeste={estadoAoVivo.estagiosTeste} rodando={rodando} />
               </div>
             )}
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,42rem)_1fr]">
+            {/* Altura fixa (não "auto") é proposital: o CSS Grid calcula a
+                altura da linha a partir do conteúdo dos itens, e como o
+                conteúdo do log varia (às vezes bem mais alto que a coluna
+                da direita), isso virava uma referência ambígua — o log
+                crescia sem limite em vez de ficar do tamanho da coluna
+                irmã (bug real visto na tela). Com altura fixa aqui, as
+                duas colunas SEMPRE dividem o mesmo espaço, e cada uma
+                rola por dentro se precisar. */}
+            <div className="grid h-[70vh] min-h-[28rem] grid-cols-1 gap-6 xl:grid-cols-[minmax(0,42rem)_1fr]">
               <ProgressoAoVivo linhas={linhas} rodando={rodando} />
               {(linhas.length > 0 || rodando) && (
-                <div className="flex flex-col gap-6">
+                <div className="flex flex-col gap-6 overflow-y-auto">
                   <ModeloAoVivo estado={estadoAoVivo} rodando={rodando} />
                   <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
                     <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
