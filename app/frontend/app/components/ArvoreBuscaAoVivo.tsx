@@ -8,9 +8,9 @@ interface Props {
   rodando: boolean;
 }
 
-const MS_POR_CANDIDATO = 220;
-const MS_PAUSA_VENCEDOR = 900;
-const MS_ESPERA_PROXIMO = 300;
+const MS_POR_CANDIDATO = 90;
+const MS_PAUSA_VENCEDOR = 450;
+const MS_ESPERA_PROXIMO = 150;
 const MAX_CANDIDATOS_EXIBIDOS = 12;
 const MAX_HISTORICO = 4;
 

@@ -18,6 +18,18 @@ const CORES: Record<LinhaProgresso["tipo"], string> = {
   erro: "text-red-400 font-semibold",
 };
 
+// As linhas "testando N candidatas: a,b,c,..." existem pro histórico
+// alimentar a árvore de busca (ver lib/progresso.ts) — a lista completa é
+// dado, não leitura. Mostrar ela inteira no log poluía muito (uma "rodada"
+// virava 4-5 linhas de nomes separados por vírgula). Aqui só resume pra
+// exibição; `linhas` (o dado real usado pelo parser) continua intacto.
+const REGEX_TESTANDO = /^((?:forward_simples|transformacao_simples(?:\[nivel2\])?|backward_simples(?:\[nivel2\])?|forward_duplo|forward_triplo): testando \d+ \S+):.*$/;
+
+function textoExibido(mensagem: string): string {
+  const m = mensagem.match(REGEX_TESTANDO);
+  return m ? `${m[1]}…` : mensagem;
+}
+
 export default function ProgressoAoVivo({ linhas, rodando }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -48,10 +60,16 @@ export default function ProgressoAoVivo({ linhas, rodando }: Props) {
           {rodando ? "Rodando…" : "Concluído"}
         </span>
       </div>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 font-mono text-xs leading-relaxed">
+      {/* min-h-0 é essencial aqui: sem ele, um filho flex nunca encolhe
+          abaixo do tamanho do próprio conteúdo (comportamento default do
+          flexbox), então o overflow-y-auto nunca entra em ação e a caixa
+          cresce sem limite em vez de acompanhar a altura da coluna irmã —
+          bug real visto na tela depois que as linhas "testando" (bem mais
+          longas) começaram a aparecer. */}
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-4 font-mono text-xs leading-relaxed">
         {linhas.map((linha, i) => (
           <div key={i} className={CORES[linha.tipo]}>
-            {linha.tipo === "etapa" ? `▸ ${linha.mensagem}` : linha.mensagem}
+            {linha.tipo === "etapa" ? `▸ ${linha.mensagem}` : textoExibido(linha.mensagem)}
           </div>
         ))}
       </div>
