@@ -7,6 +7,7 @@ seleção (selection.py) não conhece a implementação de nenhum dos dois.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -79,11 +80,15 @@ class SelectionState:
 
 #: Default de `n_jobs` calibrado por benchmark (scripts/benchmark_paralelizacao.py e
 #: docs/referencias/benchmark-paralelizacao.md): `run_level1` completo (15k linhas,
-#: 30 candidatas) nesta máquina (8 vCPUs) — n_jobs=4 27.5s, n_jobs=6 23.1s,
-#: n_jobs=8 21.3s (medido 2026-07-09, substitui a medição anterior que só tinha
-#: testado n_jobs=8 na chamada isolada, não no uso real). Ajuste para 1 se estiver
-#: iterando em datasets de desenvolvimento minúsculos e quiser o mínimo de overhead.
-N_JOBS_PADRAO = 8
+#: 30 candidatas) numa máquina de 8 vCPUs reais — n_jobs=4 27.5s, n_jobs=6 23.1s,
+#: n_jobs=8 21.3s (medido 2026-07-09). Esse número só vale em máquina com núcleos
+#: de verdade — em hospedagem free tier (Render etc., fração de 1 vCPU
+#: compartilhada) paralelizar em 8 threads é PIOR que sequencial (troca de
+#: contexto disputando um recurso que não existe). `PEDRO_WISE_N_JOBS` (env var)
+#: sobrescreve pra esses ambientes sem precisar tocar código; sem a env var, usa
+#: o default calibrado (8). Ajuste para 1 se estiver iterando em datasets de
+#: desenvolvimento minúsculos e quiser o mínimo de overhead.
+N_JOBS_PADRAO = int(os.environ.get("PEDRO_WISE_N_JOBS", "8"))
 
 
 @dataclass(frozen=True)

@@ -18,3 +18,8 @@ services:
         value: 3.12.7
       - key: FRONTEND_ORIGINS
         sync: false
+      # Free tier = fração de 1 vCPU compartilhada — paralelizar em várias
+      # threads aqui piora (troca de contexto sem núcleo de verdade por
+      # trás). Ver pedro_wise/types.py:N_JOBS_PADRAO.
+      - key: PEDRO_WISE_N_JOBS
+        value: "1"
