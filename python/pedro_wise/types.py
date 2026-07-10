@@ -77,12 +77,13 @@ class SelectionState:
     score: float
 
 
-#: Default de `n_jobs` calibrado por benchmark (scripts/benchmark_paralelizacao.py):
-#: threading com 3-4 workers ganha ~25% em bases de dezenas de milhares de linhas;
-#: em bases pequenas (milhares de linhas) o ganho não aparece mas também não há
-#: regressão relevante (overhead de thread é sub-segundo). Ajuste para 1 se estiver
+#: Default de `n_jobs` calibrado por benchmark (scripts/benchmark_paralelizacao.py e
+#: docs/referencias/benchmark-paralelizacao.md): `run_level1` completo (15k linhas,
+#: 30 candidatas) nesta máquina (8 vCPUs) — n_jobs=4 27.5s, n_jobs=6 23.1s,
+#: n_jobs=8 21.3s (medido 2026-07-09, substitui a medição anterior que só tinha
+#: testado n_jobs=8 na chamada isolada, não no uso real). Ajuste para 1 se estiver
 #: iterando em datasets de desenvolvimento minúsculos e quiser o mínimo de overhead.
-N_JOBS_PADRAO = 4
+N_JOBS_PADRAO = 8
 
 
 @dataclass(frozen=True)
