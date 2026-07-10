@@ -1,0 +1,20 @@
+# Blueprint do Render (render.com/docs/blueprint-spec) — permite criar o
+# serviço direto do dashboard via "New > Blueprint", apontando pro repo, sem
+# preencher build/start command manualmente.
+#
+# FRONTEND_ORIGINS precisa ser preenchida manualmente no dashboard do Render
+# depois que a URL do Vercel existir (é o domínio do frontend em produção,
+# liberado pro CORS do backend) — não dá pra saber antes do primeiro deploy
+# do frontend.
+services:
+  - type: web
+    name: modelagem-lab-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r app/backend/requirements.txt
+    startCommand: python -m uvicorn main:app --host 0.0.0.0 --port $PORT --app-dir app/backend
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: FRONTEND_ORIGINS
+        sync: false

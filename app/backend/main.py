@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import os
 import queue
 import threading
 from typing import Annotated, Any, Literal
@@ -43,13 +44,22 @@ from sse_starlette.sse import EventSourceResponse
 
 app = FastAPI(title="modelagem-lab API", version="0.1.0")
 
-# Dev local: frontend Next.js roda em outra porta (3000) — precisa de CORS.
+# Dev local sempre liberado; em produção (Render) o domínio do frontend
+# (Vercel) vem de FRONTEND_ORIGINS, separado por vírgula — evita hardcodar
+# a URL de deploy no código (ela muda por ambiente/preview).
+_origins_extra = [o.strip() for o in os.environ.get("FRONTEND_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", *_origins_extra],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/")
+def rota_saude() -> dict[str, str]:
+    """Health check pra plataformas de deploy (Render faz GET / por padrão)."""
+    return {"status": "ok", "servico": "modelagem-lab API"}
 
 
 @app.get("/api/datasets")

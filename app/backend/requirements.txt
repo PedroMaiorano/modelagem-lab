@@ -1,7 +1,14 @@
-# Dependências do backend (pilar interface v2), separadas do core.
-# O core em si é importado diretamente do repo (ver logica.py), não instalado
-# como pacote — mesmas dependências de python/ (statsmodels, scikit-learn,
-# scipy, pandas, numpy) também precisam estar disponíveis.
+# Dependências do backend (pilar interface v2) + do core (python/pedro_wise
+# e módulos irmãos), que o backend importa direto do repo — ver logica.py.
+# Consolidado aqui (em vez de dois requirements.txt separados) pra plataformas
+# de deploy (Render) instalarem tudo com um `pip install -r` só.
 fastapi>=0.139
 uvicorn[standard]>=0.50
 sse-starlette>=3.4
+python-multipart>=0.0.9
+pandas>=2.0
+numpy>=2.0
+scipy>=1.14
+statsmodels>=0.14
+scikit-learn>=1.5
+joblib>=1.4
