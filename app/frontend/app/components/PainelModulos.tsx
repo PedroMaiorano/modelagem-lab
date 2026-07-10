@@ -344,7 +344,11 @@ export default function PainelModulos({ dataset }: Props) {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-sm text-slate-500">Rode e inspecione cada etapa isoladamente antes do treinamento.</p>
+      <div className="rounded-lg border border-amber-800/40 bg-amber-950/10 px-3 py-2 text-xs text-amber-200/80">
+        Playground de teste — rode aqui pra entender o que cada etapa faz e explorar limiares antes de
+        decidir. Nada rodado nesta aba é usado no treinamento: a aba &ldquo;Treinamento&rdquo; sempre
+        recomputa tudo do zero com as opções configuradas lá.
+      </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <Modulo

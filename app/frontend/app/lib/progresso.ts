@@ -114,6 +114,21 @@ export function interpretarProgresso(linhas: LinhaProgresso[]): EstadoAoVivo {
   const pilhaRamos: SnapshotRamo[] = [];
 
   for (const linha of linhas) {
+    // Quando o p-valor máximo está ativo, o backend roda a busca de novo
+    // DO ZERO sem a restrição, só pra comparação (ver
+    // app/backend/logica.py:rodar_pipeline) — e os eventos dessa segunda
+    // busca passam pelo mesmo logger, com os MESMOS nomes de evento
+    // (forward_simples, etc.). Sem esse reset, o parser não tem como saber
+    // que é uma busca nova e ia continuar empilhando em cima do estado da
+    // primeira, duplicando variável no "modelo atual" (bug real visto na
+    // tela: cloud_quad/humidity_inv/temparature_inv apareciam 2x).
+    if (linha.tipo === "etapa" && /^Rodando sem o filtro de p-valor/.test(linha.mensagem)) {
+      variaveis = [];
+      scoreAtual = null;
+      historicoScore = [];
+      pilhaRamos.length = 0;
+      continue;
+    }
     if (linha.tipo !== "log") continue;
     const mensagem = linha.mensagem.trim().replace(/^\[pulado\]\s*/, "");
 
