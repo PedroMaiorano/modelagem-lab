@@ -55,6 +55,21 @@ logger = logging.getLogger(__name__)
 
 _RESPOSTA = "y"
 
+# Quantas candidatas nomear explicitamente na linha "testando" antes de
+# resumir o resto como "+N mais" — listas completas podem ter centenas de
+# nomes (construção sem limite + transformações de potência), o que só
+# infla o log sem ajudar quem lê. Consumido pela UI (app/frontend/app/lib/
+# progresso.ts) pra "piscar" as candidatas sendo avaliadas nesta rodada —
+# a lista aqui é representativa, não precisa ser exaustiva pra isso.
+_LIMITE_CANDIDATAS_LOGADAS = 24
+
+
+def _resumo_candidatas(nomes: list[str]) -> str:
+    if len(nomes) <= _LIMITE_CANDIDATAS_LOGADAS:
+        return ",".join(nomes)
+    resto = len(nomes) - _LIMITE_CANDIDATAS_LOGADAS
+    return ",".join(nomes[:_LIMITE_CANDIDATAS_LOGADAS]) + f",+{resto} mais"
+
 # Ver docstring do módulo: threading evita a cópia de df_dev/df_teste por worker
 # que torna o backend default (loky, baseado em processos) mais lento que sequencial.
 PARALLEL_BACKEND = "threading"
@@ -101,6 +116,9 @@ def forward_simples(
     if not candidatas:
         logger.info("Forward simples: sem variáveis disponíveis")
         return []
+    logger.info(
+        "forward_simples: testando %d candidatas: %s", len(candidatas), _resumo_candidatas(candidatas)
+    )
 
     def _avaliar(v: str) -> CandidateResult | None:
         resultado = _tentar_fit_score(estimator, metric, df_dev, df_teste, (*variaveis_no_modelo, v))
@@ -133,6 +151,10 @@ def transformacao_simples(
     if not pares:
         logger.info("Transformação simples: sem versões alternativas disponíveis")
         return []
+    nomes_pares = [f"{var_out}→{var_in}" for var_out, var_in in pares]
+    logger.info(
+        "transformacao_simples: testando %d trocas: %s", len(pares), _resumo_candidatas(nomes_pares)
+    )
 
     def _avaliar(par: tuple[str, str]) -> CandidateResult | None:
         var_out, var_in = par
@@ -160,6 +182,11 @@ def backward_simples(
     """
     if not variaveis_no_modelo:
         return []
+    logger.info(
+        "backward_simples: testando %d remoções: %s",
+        len(variaveis_no_modelo),
+        _resumo_candidatas(list(variaveis_no_modelo)),
+    )
 
     def _avaliar(v: str) -> CandidateResult | None:
         novas_variaveis = tuple(x for x in variaveis_no_modelo if x != v)

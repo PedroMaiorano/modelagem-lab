@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ArvoreBuscaAoVivo from "./components/ArvoreBuscaAoVivo";
 import GraficoScoreAoVivo from "./components/GraficoScoreAoVivo";
 import ModeloAoVivo from "./components/ModeloAoVivo";
 import PainelConfig from "./components/PainelConfig";
@@ -205,6 +206,18 @@ export default function Pagina() {
         <div className={aba === "treinamento" ? "" : "hidden"}>
           <div className="flex flex-col gap-8">
             <PainelConfig config={config} aoMudar={setConfig} rodando={rodando} />
+            {(linhas.length > 0 || rodando) && (
+              <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
+                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Árvore de busca ao vivo
+                </h3>
+                <p className="mb-3 text-[11px] text-slate-600">
+                  Candidatas do passo atual &ldquo;piscando&rdquo; enquanto são avaliadas — ritmo visual,
+                  não a velocidade real do backend (que avalia em paralelo, rápido demais pra acompanhar).
+                </p>
+                <ArvoreBuscaAoVivo estagiosTeste={estadoAoVivo.estagiosTeste} rodando={rodando} />
+              </div>
+            )}
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,42rem)_1fr]">
               <ProgressoAoVivo linhas={linhas} rodando={rodando} />
               {(linhas.length > 0 || rodando) && (

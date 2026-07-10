@@ -1,13 +1,13 @@
 // Interpreta o stream de log do Pedro_Wise (texto solto, ver
 // python/pedro_wise/{selection,level2,level3,pipeline}.py) pra derivar
-// estado ao vivo: modelo atual, histórico de score, estágio da busca.
-//
-// O core nunca manda dados estruturados por evento (só strings formatadas
-// pro log, ver docs/planos — decisão deliberada de não acoplar o algoritmo
-// à interface). Isso é sempre best-effort: cobre os formatos conhecidos de
-// hoje, e se um novo tipo de evento for adicionado ao core sem atualizar
-// aqui, o parser simplesmente ignora a linha (não quebra, só não atualiza
-// o estado ao vivo pra aquele evento).
+// estado ao vivo: modelo atual, histórico de score, estágio da busca, e
+// o histórico de candidatas testadas por passo (pra árvore de busca ao
+// vivo). O core nunca manda dados estruturados por evento (só strings
+// formatadas pro log — decisão deliberada de não acoplar o algoritmo à
+// interface, ver docs/planos). Isso é sempre best-effort: cobre os
+// formatos conhecidos de hoje, e se um novo tipo de evento for adicionado
+// ao core sem atualizar aqui, o parser simplesmente ignora a linha (não
+// quebra, só não atualiza o estado ao vivo pra aquele evento).
 
 import type { LinhaProgresso } from "../components/ProgressoAoVivo";
 
@@ -16,48 +16,71 @@ export interface PontoScore {
   score: number;
 }
 
+/** Um passo da busca (ex.: "forward simples testando 9 candidatas") — o
+ * núcleo declara a lista ANTES de avaliar (ver
+ * `pedro_wise.selection._resumo_candidatas`), e `vencedor` é preenchido
+ * quando o evento de aceite correspondente chega logo em seguida (`null`
+ * se nenhuma candidata melhorou o score e a busca seguiu adiante). */
+export interface EstagioTeste {
+  rotulo: string;
+  candidatos: string[];
+  vencedor: string | null;
+}
+
 export interface EstadoAoVivo {
   variaveisAtuais: string[];
   scoreAtual: number | null;
   historicoScore: PontoScore[];
   estagioAtual: string | null;
   nEventosAceitos: number;
+  estagiosTeste: EstagioTeste[];
 }
 
 const PADROES: Array<{
   regex: RegExp;
   aplicar: (m: RegExpMatchArray, vars: string[]) => string[];
+  /** Label da candidata vencedora no MESMO formato usado em `candidatos`
+   * de `PADROES_TESTANDO` — permite casar o aceite com a declaração
+   * aberta. `null` pro caso do nível 3 (não tem declaração "testando"
+   * pareada nesse nível, é tratado à parte via pilha de ramos). */
+  labelVencedor: ((m: RegExpMatchArray) => string) | null;
 }> = [
   // "Nível 3: ramo vencedor ... => score=X | variaveis=a,b,c" — substitui o
   // conjunto inteiro (o ramo pode ter reconstruído o modelo do zero).
   {
     regex: /^Nível 3: ramo vencedor supera o modelo atual => score=[\d.]+ \| variaveis=(.*)$/,
     aplicar: (m) => m[1].split(",").filter(Boolean),
+    labelVencedor: null,
   },
   // "forward_duplo: +v +w => score=X"
   {
     regex: /^forward_duplo: \+(\S+) \+(\S+) => score=[\d.]+/,
     aplicar: (m, vars) => [...vars, m[1], m[2]],
+    labelVencedor: (m) => `${m[1]}+${m[2]}`,
   },
   // "forward_triplo: +v1 +v2 +v3 => score=X"
   {
     regex: /^forward_triplo: \+(\S+) \+(\S+) \+(\S+) => score=[\d.]+/,
     aplicar: (m, vars) => [...vars, m[1], m[2], m[3]],
+    labelVencedor: (m) => `${m[1]}+${m[2]}+${m[3]}`,
   },
   // "transformacao_simples[nivel2]: -a +b => score=X" ou "transformacao_simples: -a +b => score=X"
   {
     regex: /^transformacao_simples(?:\[nivel2\])?: -(\S+) \+(\S+) => score=[\d.]+/,
     aplicar: (m, vars) => [...vars.filter((v) => v !== m[1]), m[2]],
+    labelVencedor: (m) => `${m[1]}→${m[2]}`,
   },
   // "backward_simples[nivel2]: -v => score=X" ou "backward_simples: -v => score=X"
   {
     regex: /^backward_simples(?:\[nivel2\])?: -(\S+) => score=[\d.]+/,
     aplicar: (m, vars) => vars.filter((v) => v !== m[1]),
+    labelVencedor: (m) => m[1],
   },
   // "forward_simples: +v => score=X"
   {
     regex: /^forward_simples: \+(\S+) => score=[\d.]+/,
     aplicar: (m, vars) => [...vars, m[1]],
+    labelVencedor: (m) => m[1],
   },
 ];
 
@@ -85,6 +108,18 @@ function estagioDaLinha(mensagem: string): string | null {
   return null;
 }
 
+// "testando N candidatas/trocas/remoções/pares/triplas: a,b,c" — declarado
+// pelo núcleo ANTES de avaliar (ver pedro_wise/{selection,level2}.py),
+// abre um EstagioTeste que fecha quando o próximo evento chega (aceite
+// vira `vencedor`, qualquer outra coisa vira `vencedor: null`).
+const PADROES_TESTANDO: Array<{ regex: RegExp; rotulo: string }> = [
+  { regex: /^forward_simples: testando \d+ candidatas: (.*)$/, rotulo: "forward simples" },
+  { regex: /^transformacao_simples: testando \d+ trocas: (.*)$/, rotulo: "transformação simples" },
+  { regex: /^backward_simples: testando \d+ remoções: (.*)$/, rotulo: "backward simples" },
+  { regex: /^forward_duplo: testando \d+ pares: (.*)$/, rotulo: "forward duplo" },
+  { regex: /^forward_triplo: testando \d+ triplas: (.*)$/, rotulo: "forward triplo" },
+];
+
 // O nível 3 roda sub-buscas completas "por baixo" pra cada candidato de
 // remoção, e TODAS logam através do mesmo logger global — inclusive as que
 // acabam descartadas porque não superaram o modelo atual. Sem distinguir
@@ -103,6 +138,7 @@ interface SnapshotRamo {
   variaveis: string[];
   scoreAtual: number | null;
   historicoLen: number;
+  estagiosTesteLen: number;
 }
 
 export function interpretarProgresso(linhas: LinhaProgresso[]): EstadoAoVivo {
@@ -111,7 +147,15 @@ export function interpretarProgresso(linhas: LinhaProgresso[]): EstadoAoVivo {
   let historicoScore: PontoScore[] = [];
   let estagioAtual: string | null = null;
   let nEventosAceitos = 0;
+  let estagiosTeste: EstagioTeste[] = [];
+  let estagioAberto: EstagioTeste | null = null;
   const pilhaRamos: SnapshotRamo[] = [];
+
+  function fecharEstagioAberto(vencedor: string | null) {
+    if (!estagioAberto) return;
+    estagiosTeste = [...estagiosTeste, { ...estagioAberto, vencedor }];
+    estagioAberto = null;
+  }
 
   for (const linha of linhas) {
     // Quando o p-valor máximo está ativo, o backend roda a busca de novo
@@ -126,6 +170,8 @@ export function interpretarProgresso(linhas: LinhaProgresso[]): EstadoAoVivo {
       variaveis = [];
       scoreAtual = null;
       historicoScore = [];
+      estagiosTeste = [];
+      estagioAberto = null;
       pilhaRamos.length = 0;
       continue;
     }
@@ -136,18 +182,33 @@ export function interpretarProgresso(linhas: LinhaProgresso[]): EstadoAoVivo {
     if (estagio) estagioAtual = estagio;
 
     if (REGEX_INICIO_RAMO.test(mensagem)) {
-      pilhaRamos.push({ variaveis, scoreAtual, historicoLen: historicoScore.length });
+      fecharEstagioAberto(null);
+      pilhaRamos.push({ variaveis, scoreAtual, historicoLen: historicoScore.length, estagiosTesteLen: estagiosTeste.length });
       continue;
     }
     if (REGEX_DESCARTE_RAMO.test(mensagem)) {
+      fecharEstagioAberto(null);
       const snapshot = pilhaRamos.pop();
       if (snapshot) {
         variaveis = snapshot.variaveis;
         scoreAtual = snapshot.scoreAtual;
         historicoScore = historicoScore.slice(0, snapshot.historicoLen);
+        estagiosTeste = estagiosTeste.slice(0, snapshot.estagiosTesteLen);
       }
       continue;
     }
+
+    let casouTestando = false;
+    for (const padrao of PADROES_TESTANDO) {
+      const m = mensagem.match(padrao.regex);
+      if (!m) continue;
+      fecharEstagioAberto(null); // declaração anterior nunca teve aceite — descartada
+      const candidatos = m[1].split(",").filter(Boolean);
+      estagioAberto = { rotulo: padrao.rotulo, candidatos, vencedor: null };
+      casouTestando = true;
+      break;
+    }
+    if (casouTestando) continue;
 
     for (const padrao of PADROES) {
       const m = mensagem.match(padrao.regex);
@@ -156,6 +217,7 @@ export function interpretarProgresso(linhas: LinhaProgresso[]): EstadoAoVivo {
       nEventosAceitos += 1;
       // "ramo vencedor" fecha (commita) o par aberto por "avaliando N candidato(s)".
       if (padrao === PADROES[0]) pilhaRamos.pop();
+      if (padrao.labelVencedor) fecharEstagioAberto(padrao.labelVencedor(m));
       const scoreMatch = mensagem.match(REGEX_SCORE);
       if (scoreMatch) {
         scoreAtual = Number(scoreMatch[1]);
@@ -165,5 +227,7 @@ export function interpretarProgresso(linhas: LinhaProgresso[]): EstadoAoVivo {
     }
   }
 
-  return { variaveisAtuais: variaveis, scoreAtual, historicoScore, estagioAtual, nEventosAceitos };
+  if (estagioAberto) estagiosTeste = [...estagiosTeste, estagioAberto];
+
+  return { variaveisAtuais: variaveis, scoreAtual, historicoScore, estagioAtual, nEventosAceitos, estagiosTeste };
 }

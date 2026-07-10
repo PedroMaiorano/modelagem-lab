@@ -21,6 +21,7 @@ from pedro_wise.base import variaveis_disponiveis
 from pedro_wise.selection import (
     PARALLEL_BACKEND,
     _melhor,
+    _resumo_candidatas,
     _tentar_fit_score,
     backward_simples,
     forward_simples,
@@ -64,6 +65,8 @@ def forward_duplo(
     if not pares:
         logger.info("Forward duplo: nenhum par disponível")
         return []
+    nomes_pares = [f"{v}+{w}" for v, w in pares]
+    logger.info("forward_duplo: testando %d pares: %s", len(pares), _resumo_candidatas(nomes_pares))
 
     def _avaliar(par: tuple[str, str]) -> CandidateResult | None:
         v, w = par
@@ -118,6 +121,8 @@ def forward_triplo(
     if not triplas:
         logger.info("Forward triplo: nenhuma tripla disponível")
         return []
+    nomes_triplas = [f"{v1}+{v2}+{z}" for v1, v2, z in triplas]
+    logger.info("forward_triplo: testando %d triplas: %s", len(triplas), _resumo_candidatas(nomes_triplas))
 
     def _avaliar(tripla: tuple[str, str, str]) -> CandidateResult | None:
         v1, v2, z = tripla
