@@ -313,16 +313,23 @@ def rodar_agregacao(
     como registros (JSON-serializável) pra interface guardar e mandar de
     volta na chamada da esfera 2 (`descobrir_em_tabela`), sem precisar ler a
     base do disco de novo nem introduzir estado no backend entre as duas
-    chamadas. `ivs`: poder preditivo de cada coluna gerada, sozinha --
-    visão rápida antes de ir pra descoberta de interação."""
+    chamadas. `ivs`: poder preditivo de cada coluna, sozinha -- tanto das
+    colunas geradas quanto das originais (no último período de cada chave,
+    que é o que sobra na tabela depois do `groupby().tail(1)`) -- pra dar
+    pra comparar se agregar ajudou ou não."""
     agregacao = agregar_base(base, tipo, chave, coluna_tempo, colunas_valor, janelas)
     tabela: pd.DataFrame = agregacao["tabela"]
     colunas_geradas: list[str] = agregacao["colunas_geradas"]
-    ivs = _iv_univariado(tabela, colunas_geradas, tabela["y"]) if "y" in tabela.columns else {}
+    tem_alvo = "y" in tabela.columns
+    ivs = _iv_univariado(tabela, colunas_geradas, tabela["y"]) if tem_alvo else {}
+    ivs_originais = _iv_univariado(tabela, colunas_valor, tabela["y"]) if tem_alvo else {}
     return {
         "tabela": tabela.to_dict(orient="records"),
         "colunas_geradas": colunas_geradas,
+        "colunas_originais": colunas_valor,
         "ivs": ivs,
+        "ivs_originais": ivs_originais,
+        "taxa_evento": float(tabela["y"].mean()) if tem_alvo else None,
         "n_linhas_painel": agregacao["n_linhas_painel"],
         "n_chaves": agregacao["n_chaves"],
     }

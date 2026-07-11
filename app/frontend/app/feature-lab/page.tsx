@@ -41,7 +41,6 @@ const CAMPOS_ORDENACAO: { campo: CampoOrdenacao; rotulo: string }[] = [
 const ABAS = [
   { id: "esfera1", rotulo: "Esfera 1" },
   { id: "esfera2", rotulo: "Esfera 2" },
-  { id: "resultado", rotulo: "Resultado" },
 ] as const;
 
 type Aba = (typeof ABAS)[number]["id"];
@@ -219,7 +218,6 @@ export default function FeatureLabPagina() {
         r = await descobrirEmTabela({ tabela: bruta.tabela, colunas_x: [...colunasX], ...parametros });
       }
       setResultado(r);
-      setAba("resultado");
     } catch (e) {
       setErro(String(e));
     } finally {
@@ -235,8 +233,31 @@ export default function FeatureLabPagina() {
     }
   }
 
+  function aoLimparEsfera1() {
+    setResultadoEsfera1(null);
+    setFonteEsfera2("bruta");
+  }
+
+  // Qual variável bruta originou uma coluna gerada -- o nome já entrega
+  // isso (`dias_atraso_tendencia_3m` -> `dias_atraso`), mas pedido
+  // explícito: uma marcação visual além do nome. Reconhece pelo prefixo
+  // contra a lista real de colunas originais (mais confiável que regex
+  // solto, já que a convenção de sufixo vive só no backend).
+  function origemDe(colunaGerada: string, colunasOriginais: string[]): string {
+    return colunasOriginais.find((o) => colunaGerada.startsWith(`${o}_`)) ?? "?";
+  }
+
+  const CORES_ORIGEM: Record<string, string> = {};
+  const PALETA_ORIGEM = ["text-sky-400", "text-violet-400", "text-amber-400", "text-rose-400", "text-cyan-400"];
+  (resultadoEsfera1?.colunas_originais ?? []).forEach((o, i) => {
+    CORES_ORIGEM[o] = PALETA_ORIGEM[i % PALETA_ORIGEM.length];
+  });
+
   const colunasGeradasComIv = [...(resultadoEsfera1?.colunas_geradas ?? [])].sort(
     (a, b) => (resultadoEsfera1?.ivs[b] ?? 0) - (resultadoEsfera1?.ivs[a] ?? 0),
+  );
+  const colunasOriginaisComIv = [...(resultadoEsfera1?.colunas_originais ?? [])].sort(
+    (a, b) => (resultadoEsfera1?.ivs_originais[b] ?? 0) - (resultadoEsfera1?.ivs_originais[a] ?? 0),
   );
   const colunasParaEsfera2 = fonteEsfera2 === "esfera1" ? (resultadoEsfera1?.colunas_geradas ?? []) : colunasNumericasBase;
 
@@ -373,42 +394,97 @@ export default function FeatureLabPagina() {
 
                 {resultadoEsfera1 && (
                   <div className="mt-4 border-t border-slate-800 pt-4">
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                      <Metrica
-                        rotulo="linhas do painel"
-                        valor={resultadoEsfera1.n_linhas_painel.toLocaleString("pt-BR")}
-                      />
-                      <Metrica rotulo="chaves" valor={resultadoEsfera1.n_chaves.toLocaleString("pt-BR")} />
-                      <Metrica rotulo="colunas geradas" valor={String(resultadoEsfera1.colunas_geradas.length)} />
-                      <Metrica
-                        rotulo="linhas resultantes"
-                        valor={resultadoEsfera1.tabela.length.toLocaleString("pt-BR")}
-                      />
+                    <div className="mb-3 flex items-center justify-between">
+                      <div className="grid grow grid-cols-2 gap-3 sm:grid-cols-4">
+                        <Metrica
+                          rotulo="linhas do painel"
+                          valor={resultadoEsfera1.n_linhas_painel.toLocaleString("pt-BR")}
+                        />
+                        <Metrica rotulo="chaves" valor={resultadoEsfera1.n_chaves.toLocaleString("pt-BR")} />
+                        <Metrica rotulo="colunas geradas" valor={String(resultadoEsfera1.colunas_geradas.length)} />
+                        <Metrica
+                          rotulo="linhas resultantes"
+                          valor={resultadoEsfera1.tabela.length.toLocaleString("pt-BR")}
+                        />
+                      </div>
+                      <button
+                        onClick={aoLimparEsfera1}
+                        className="ml-3 shrink-0 rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:border-slate-500 hover:text-slate-200"
+                      >
+                        Limpar
+                      </button>
                     </div>
 
-                    <p className="mb-1.5 mt-4 text-[11px] text-slate-500">
-                      colunas geradas, por IV individual (sozinha, antes de qualquer combinação)
+                    <p className="mb-4 text-xs text-slate-500">
+                      Variável resposta: <span className="font-mono text-slate-300">y</span> — convenção
+                      fixa do lab (não configurável).
+                      {resultadoEsfera1.taxa_evento !== null &&
+                        ` Taxa de evento: ${(resultadoEsfera1.taxa_evento * 100).toFixed(1)}%.`}
                     </p>
-                    <div className="max-h-52 overflow-y-auto rounded-lg border border-slate-700">
-                      <table className="w-full text-xs">
-                        <thead className="sticky top-0 bg-slate-800/90 text-slate-400">
-                          <tr>
-                            <th className="px-3 py-1.5 text-left font-medium">coluna</th>
-                            <th className="px-3 py-1.5 text-right font-medium">IV</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {colunasGeradasComIv.map((c, i) => (
-                            <tr key={c} className={i % 2 === 0 ? "bg-slate-900/40" : "bg-slate-900/70"}>
-                              <td className="px-3 py-1 font-mono text-slate-300">{c}</td>
-                              <td className="px-3 py-1 text-right tabular-nums text-emerald-400">
-                                {(resultadoEsfera1.ivs[c] ?? 0).toFixed(3)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <p className="mb-1.5 text-[11px] text-slate-500">
+                          variáveis originais (como estavam na base, no último período de cada chave)
+                        </p>
+                        <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-700">
+                          <table className="w-full text-xs">
+                            <thead className="sticky top-0 bg-slate-800/90 text-slate-400">
+                              <tr>
+                                <th className="px-3 py-1.5 text-left font-medium">coluna</th>
+                                <th className="px-3 py-1.5 text-right font-medium">IV</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {colunasOriginaisComIv.map((c, i) => (
+                                <tr key={c} className={i % 2 === 0 ? "bg-slate-900/40" : "bg-slate-900/70"}>
+                                  <td className={`px-3 py-1 font-mono ${CORES_ORIGEM[c] ?? "text-slate-300"}`}>
+                                    {c}
+                                  </td>
+                                  <td className="px-3 py-1 text-right tabular-nums text-slate-300">
+                                    {(resultadoEsfera1.ivs_originais[c] ?? 0).toFixed(3)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className="mb-1.5 text-[11px] text-slate-500">
+                          variáveis construídas (por IV individual, antes de qualquer combinação)
+                        </p>
+                        <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-700">
+                          <table className="w-full text-xs">
+                            <thead className="sticky top-0 bg-slate-800/90 text-slate-400">
+                              <tr>
+                                <th className="px-3 py-1.5 text-left font-medium">coluna</th>
+                                <th className="px-3 py-1.5 text-left font-medium">origem</th>
+                                <th className="px-3 py-1.5 text-right font-medium">IV</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {colunasGeradasComIv.map((c, i) => {
+                                const origem = origemDe(c, resultadoEsfera1.colunas_originais);
+                                return (
+                                  <tr key={c} className={i % 2 === 0 ? "bg-slate-900/40" : "bg-slate-900/70"}>
+                                    <td className="px-3 py-1 font-mono text-slate-300">{c}</td>
+                                    <td className={`px-3 py-1 font-mono ${CORES_ORIGEM[origem] ?? "text-slate-500"}`}>
+                                      {origem}
+                                    </td>
+                                    <td className="px-3 py-1 text-right tabular-nums text-emerald-400">
+                                      {(resultadoEsfera1.ivs[c] ?? 0).toFixed(3)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
                     </div>
+
                     <p className="mt-3 text-xs text-slate-500">
                       Pronto — vá pra aba <span className="text-slate-300">Esfera 2</span> pra descobrir
                       interações a partir dessas colunas.
@@ -552,15 +628,9 @@ export default function FeatureLabPagina() {
                   {rodandoEsfera2 ? "Rodando…" : "Rodar esfera 2"}
                 </button>
               </div>
-            </div>
 
-            <div className={aba === "resultado" ? "" : "hidden"}>
-              {!resultado ? (
-                <p className="text-sm text-slate-600">
-                  Nenhum resultado ainda — configure na aba &ldquo;Esfera 2&rdquo; e rode.
-                </p>
-              ) : (
-                <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-5">
+              {resultado && (
+                <div className="mt-6 rounded-xl border border-slate-700 bg-slate-900/70 p-5">
                   <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Resultado</h2>
                   <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
                     <Metrica rotulo="colunas candidatas" valor={String(resultado.colunas_x.length)} />

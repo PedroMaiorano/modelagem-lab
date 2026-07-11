@@ -406,7 +406,10 @@ export interface ConfigAgregacao {
 export interface ResultadoAgregacao {
   tabela: Record<string, unknown>[];
   colunas_geradas: string[];
+  colunas_originais: string[];
   ivs: Record<string, number>;
+  ivs_originais: Record<string, number>;
+  taxa_evento: number | null;
   n_linhas_painel: number;
   n_chaves: number;
 }
