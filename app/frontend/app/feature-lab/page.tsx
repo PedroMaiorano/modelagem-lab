@@ -248,12 +248,16 @@ export default function FeatureLabPagina() {
     }
   }
 
-  const esfera2Liberada = usarEsfera1 ? resultadoEsfera1 !== null : colunasBase.length > 0;
-  const colunasParaEsfera2 = usarEsfera1
-    ? (resultadoEsfera1?.colunas_geradas ?? [])
-    : base?.tipo === "flat"
-      ? colunasFlatNumericas
-      : colunasBase.filter((c) => c !== chave && c !== colunaTempo);
+  // Candidatas quando a esfera 1 tá desligada: coluna numérica de verdade
+  // (nunca depende de qual coluna foi escolhida como chave/tempo -- bug
+  // real visto na tela, "contrato"/"safra" sumiam da lista sem motivo).
+  const colunasNumericasBase = base?.tipo === "painel" ? (info?.colunas_numericas ?? []) : colunasFlatNumericas;
+  const colunasGeradasComIv = [...(resultadoEsfera1?.colunas_geradas ?? [])].sort(
+    (a, b) => (resultadoEsfera1?.ivs[b] ?? 0) - (resultadoEsfera1?.ivs[a] ?? 0),
+  );
+
+  const esfera2Liberada = usarEsfera1 ? resultadoEsfera1 !== null : colunasNumericasBase.length > 0;
+  const colunasParaEsfera2 = usarEsfera1 ? (resultadoEsfera1?.colunas_geradas ?? []) : colunasNumericasBase;
 
   const regrasFiltradas: RegraFeatureLab[] = (resultado?.regras ?? [])
     .filter((r) => r.iv_teste >= ivMinimo)
@@ -335,106 +339,150 @@ export default function FeatureLabPagina() {
         </div>
       </Secao>
 
-      {/* Toggle da esfera 1 -- decisão do usuário, não travada pelo tipo --- */}
+      {/* Etapa 2: esfera 1 -- card persistente (nunca some/reaparece de
+          tamanho diferente): o toggle mora no próprio cabeçalho, só o
+          CONTEÚDO colapsa quando desligado. */}
       {base && colunasBase.length > 0 && (
-        <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={usarEsfera1}
-            onChange={(e) => setUsarEsfera1(e.target.checked)}
-            className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
-          />
-          Usar esfera 1 (agregação por chave + tempo)
-        </label>
-      )}
-
-      {/* Etapa 2: esfera 1 ------------------------------------------------ */}
-      {usarEsfera1 && base && colunasBase.length > 0 && (
-        <Secao titulo="2. Esfera 1 — agregação temporal">
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap gap-4">
-              <div>
-                <label className="mb-1 block text-[11px] text-slate-500">chave</label>
-                <select
-                  value={chave}
-                  onChange={(e) => setChave(e.target.value)}
-                  className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-                >
-                  {colunasBase.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-[11px] text-slate-500">coluna de tempo/safra</label>
-                <select
-                  value={colunaTempo}
-                  onChange={(e) => setColunaTempo(e.target.value)}
-                  className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-                >
-                  {colunasBase.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div>
-              <p className="mb-1.5 text-[11px] text-slate-500">
-                colunas brutas a agregar (máximo/média/mínimo/desvio/tendência por janela)
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {colunasBase
-                  .filter((c) => c !== chave && c !== colunaTempo && c !== "y")
-                  .map((c) => (
-                    <label
-                      key={c}
-                      className="flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={colunasValor.has(c)}
-                        onChange={() => alternar(colunasValor, c, setColunasValor)}
-                        className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
-                      />
-                      {c}
-                    </label>
-                  ))}
-              </div>
-            </div>
-            <div>
-              <label className="mb-1 block text-[11px] text-slate-500">
-                janelas (períodos, separadas por vírgula)
-              </label>
+        <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              2. Esfera 1 — agregação temporal
+            </h2>
+            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
               <input
-                type="text"
-                value={janelasTexto}
-                onChange={(e) => setJanelasTexto(e.target.value)}
-                placeholder="3,6,12"
-                className="w-32 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                type="checkbox"
+                checked={usarEsfera1}
+                onChange={(e) => setUsarEsfera1(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
               />
-            </div>
+              usar esfera 1
+            </label>
           </div>
-          <button
-            onClick={aoRodarEsfera1}
-            disabled={rodandoEsfera1}
-            className="mt-4 rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {rodandoEsfera1 ? "Rodando…" : "Rodar esfera 1"}
-          </button>
 
-          {resultadoEsfera1 && (
-            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 border-t border-slate-800 pt-4">
-              <Metrica rotulo="linhas do painel" valor={resultadoEsfera1.n_linhas_painel.toLocaleString("pt-BR")} />
-              <Metrica rotulo="chaves" valor={resultadoEsfera1.n_chaves.toLocaleString("pt-BR")} />
-              <Metrica rotulo="colunas geradas" valor={String(resultadoEsfera1.colunas_geradas.length)} />
-              <Metrica rotulo="linhas resultantes" valor={resultadoEsfera1.tabela.length.toLocaleString("pt-BR")} />
-            </div>
+          {!usarEsfera1 ? (
+            <p className="text-xs text-slate-500">
+              Desligada — a esfera 2 abaixo usa as colunas numéricas da base direto, sem agregar.
+            </p>
+          ) : (
+            <>
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-wrap gap-4">
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-500">chave</label>
+                    <select
+                      value={chave}
+                      onChange={(e) => setChave(e.target.value)}
+                      className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                    >
+                      {colunasBase.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-500">coluna de tempo/safra</label>
+                    <select
+                      value={colunaTempo}
+                      onChange={(e) => setColunaTempo(e.target.value)}
+                      className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                    >
+                      {colunasBase.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-1.5 text-[11px] text-slate-500">
+                    colunas brutas a agregar (máximo/média/mínimo/desvio/tendência por janela)
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {colunasBase
+                      .filter((c) => c !== chave && c !== colunaTempo && c !== "y")
+                      .map((c) => (
+                        <label
+                          key={c}
+                          className="flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={colunasValor.has(c)}
+                            onChange={() => alternar(colunasValor, c, setColunasValor)}
+                            className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+                          />
+                          {c}
+                        </label>
+                      ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] text-slate-500">
+                    janelas (períodos, separadas por vírgula)
+                  </label>
+                  <input
+                    type="text"
+                    value={janelasTexto}
+                    onChange={(e) => setJanelasTexto(e.target.value)}
+                    placeholder="3,6,12"
+                    className="w-32 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                  />
+                </div>
+              </div>
+              <button
+                onClick={aoRodarEsfera1}
+                disabled={rodandoEsfera1}
+                className="mt-4 rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {rodandoEsfera1 ? "Rodando…" : "Rodar esfera 1"}
+              </button>
+
+              {resultadoEsfera1 && (
+                <div className="mt-4 border-t border-slate-800 pt-4">
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <Metrica
+                      rotulo="linhas do painel"
+                      valor={resultadoEsfera1.n_linhas_painel.toLocaleString("pt-BR")}
+                    />
+                    <Metrica rotulo="chaves" valor={resultadoEsfera1.n_chaves.toLocaleString("pt-BR")} />
+                    <Metrica rotulo="colunas geradas" valor={String(resultadoEsfera1.colunas_geradas.length)} />
+                    <Metrica
+                      rotulo="linhas resultantes"
+                      valor={resultadoEsfera1.tabela.length.toLocaleString("pt-BR")}
+                    />
+                  </div>
+
+                  <p className="mb-1.5 mt-4 text-[11px] text-slate-500">
+                    colunas geradas, por IV individual (sozinha, antes de qualquer combinação)
+                  </p>
+                  <div className="max-h-52 overflow-y-auto rounded-lg border border-slate-700">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-slate-800/90 text-slate-400">
+                        <tr>
+                          <th className="px-3 py-1.5 text-left font-medium">coluna</th>
+                          <th className="px-3 py-1.5 text-right font-medium">IV</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {colunasGeradasComIv.map((c, i) => (
+                          <tr key={c} className={i % 2 === 0 ? "bg-slate-900/40" : "bg-slate-900/70"}>
+                            <td className="px-3 py-1 font-mono text-slate-300">{c}</td>
+                            <td className="px-3 py-1 text-right tabular-nums text-emerald-400">
+                              {(resultadoEsfera1.ivs[c] ?? 0).toFixed(3)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
           )}
-        </Secao>
+        </div>
       )}
 
       {/* Etapa 3: esfera 2 -------------------------------------------------- */}

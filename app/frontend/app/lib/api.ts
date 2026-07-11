@@ -382,6 +382,7 @@ export interface BaseFeatureLab {
 
 export interface InfoPainel {
   colunas: string[];
+  colunas_numericas: string[];
   chave_sugerida: string;
   tempo_sugerido: string;
   colunas_valor_disponiveis: string[];
@@ -405,6 +406,7 @@ export interface ConfigAgregacao {
 export interface ResultadoAgregacao {
   tabela: Record<string, unknown>[];
   colunas_geradas: string[];
+  ivs: Record<string, number>;
   n_linhas_painel: number;
   n_chaves: number;
 }

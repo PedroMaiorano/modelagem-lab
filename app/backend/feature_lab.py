@@ -36,7 +36,9 @@ from agregacao_temporal import (  # noqa: E402
     extrair_base_agregado,
     normalizar_safra,
 )
+from categorizacao import aplicar_bins, bins_frequencia_igual  # noqa: E402
 from interacao import avaliar_estabilidade, extrair_candidatas  # noqa: E402
+from transformacao.woe import ajustar_woe  # noqa: E402
 
 DIR_PAINEIS = _RAIZ / "data"
 
@@ -78,9 +80,18 @@ def info_painel(nome: str) -> dict[str, Any]:
         colunas[1] if len(colunas) > 1 else "",
     )
     colunas_valor_disponiveis = [c for c in colunas if c not in {chave_sugerida, tempo_sugerido}]
+    # Candidatas pra esfera 2 quando a esfera 1 tá desligada: só coluna
+    # numérica de verdade -- não pode depender de qual coluna foi sugerida
+    # como chave/tempo (bug real: `contrato`/`safra` sumiam da lista de
+    # candidatas mesmo com a esfera 1 desativada, porque o estado de
+    # chave/tempo continuava marcado). Coluna de texto (chave, safra em
+    # formato "2024-01" etc.) não entra num classificador numérico de
+    # qualquer forma, então o filtro certo é por tipo, não por seleção.
+    colunas_numericas = [c for c in colunas if c != "y" and pd.api.types.is_numeric_dtype(df[c])]
 
     return {
         "colunas": colunas,
+        "colunas_numericas": colunas_numericas,
         "chave_sugerida": chave_sugerida,
         "tempo_sugerido": tempo_sugerido,
         "colunas_valor_disponiveis": colunas_valor_disponiveis,
@@ -225,6 +236,26 @@ def _empacotar_regras(regras: list[Any], tabela: pd.DataFrame) -> list[dict[str,
     return linhas
 
 
+def _iv_univariado(df: pd.DataFrame, colunas: list[str], y: pd.Series) -> dict[str, float]:
+    """IV de cada coluna sozinha (não em combinação) -- reaproveita o
+    binning e o cálculo de IV que já existem (`categorizacao`,
+    `transformacao.woe`), não reimplementa nada. Dá uma visão rápida de
+    quais colunas geradas pela esfera 1 já são fortes por conta própria,
+    antes de olhar as regras de interação da esfera 2.
+    """
+    resultado = {}
+    for c in colunas:
+        try:
+            edges = bins_frequencia_igual(df[c], n_bins=10)
+            bin_idx = aplicar_bins(df[c], edges)
+            resultado[c] = ajustar_woe(bin_idx.astype(str), y).iv_total
+        except (ValueError, IndexError):
+            # coluna degenerada (constante, poucos valores distintos etc.)
+            # -- não impede o cálculo das outras.
+            resultado[c] = 0.0
+    return resultado
+
+
 def _descobrir(
     X_dev: pd.DataFrame,
     y_dev: pd.Series,
@@ -282,11 +313,16 @@ def rodar_agregacao(
     como registros (JSON-serializável) pra interface guardar e mandar de
     volta na chamada da esfera 2 (`descobrir_em_tabela`), sem precisar ler a
     base do disco de novo nem introduzir estado no backend entre as duas
-    chamadas."""
+    chamadas. `ivs`: poder preditivo de cada coluna gerada, sozinha --
+    visão rápida antes de ir pra descoberta de interação."""
     agregacao = agregar_base(base, tipo, chave, coluna_tempo, colunas_valor, janelas)
+    tabela: pd.DataFrame = agregacao["tabela"]
+    colunas_geradas: list[str] = agregacao["colunas_geradas"]
+    ivs = _iv_univariado(tabela, colunas_geradas, tabela["y"]) if "y" in tabela.columns else {}
     return {
-        "tabela": agregacao["tabela"].to_dict(orient="records"),
-        "colunas_geradas": agregacao["colunas_geradas"],
+        "tabela": tabela.to_dict(orient="records"),
+        "colunas_geradas": colunas_geradas,
+        "ivs": ivs,
         "n_linhas_painel": agregacao["n_linhas_painel"],
         "n_chaves": agregacao["n_chaves"],
     }
