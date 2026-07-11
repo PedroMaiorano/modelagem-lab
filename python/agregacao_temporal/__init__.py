@@ -6,5 +6,6 @@ sistemática o padrão manual usado para o atraso (tendência_3m × máximo_3m).
 """
 
 from agregacao_temporal.primitivas import PRIMITIVAS_JANELA, construir_agregados_janela
+from agregacao_temporal.safra import normalizar_safra
 
-__all__ = ["PRIMITIVAS_JANELA", "construir_agregados_janela"]
+__all__ = ["PRIMITIVAS_JANELA", "construir_agregados_janela", "normalizar_safra"]
