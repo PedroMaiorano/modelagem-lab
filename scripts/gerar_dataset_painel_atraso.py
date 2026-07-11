@@ -122,7 +122,11 @@ def main() -> None:
     ultimo_mes["y"] = rng.binomial(1, p)
 
     SAIDA.mkdir(parents=True, exist_ok=True)
-    painel.to_csv(SAIDA / "painel.csv", index=False)
+    # safra_norm era só pra ordenar/agregar aqui dentro -- persistir junto
+    # com o painel bruto confundia consumidores que esperam só colunas
+    # "de verdade" (ex.: a interface do Feature-lab listando candidatas
+    # pra agregar, que não deveria incluir uma coluna de tempo já normalizada).
+    painel.drop(columns=["safra_norm"]).to_csv(SAIDA / "painel.csv", index=False)
     ultimo_mes.to_csv(SAIDA / "agregado.csv", index=False)
 
     taxa_a = ultimo_mes.loc[ultimo_mes["grupo"] == "A", "y"].mean()

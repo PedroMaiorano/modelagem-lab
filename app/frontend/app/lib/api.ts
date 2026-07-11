@@ -370,3 +370,77 @@ export async function rodarPipelineComProgresso(
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Feature-lab (esferas 1/2, experimental). Ver app/backend/feature_lab.py.
+// ---------------------------------------------------------------------------
+
+export interface InfoPainel {
+  colunas: string[];
+  chave_sugerida: string;
+  tempo_sugerido: string;
+  colunas_valor_disponiveis: string[];
+  n_linhas: number;
+  n_chaves: number;
+}
+
+export interface ConfigFeatureLab {
+  painel: string;
+  chave: string;
+  coluna_tempo: string;
+  colunas_valor: string[];
+  janelas: number[];
+  profundidade_maxima: number;
+  n_arvores: number;
+  min_suporte: number;
+  max_suporte: number;
+  max_regras: number;
+  permitir_cruzamento_entre_bases: boolean;
+}
+
+export interface RegraFeatureLab {
+  regra: string;
+  suporte_dev: number;
+  suporte_teste: number;
+  iv_dev: number;
+  iv_teste: number;
+}
+
+export interface ResultadoFeatureLab {
+  n_linhas_painel: number;
+  n_chaves: number;
+  colunas_geradas: string[];
+  n_dev: number;
+  n_teste: number;
+  taxa_evento_dev: number;
+  taxa_evento_teste: number;
+  regras: RegraFeatureLab[];
+  melhor_regra: string | null;
+  auc_sem_regra: number | null;
+  auc_com_regra: number | null;
+}
+
+export async function listarPaineis(): Promise<string[]> {
+  const resp = await fetch(`${URL_API}/api/feature-lab/paineis`);
+  if (!resp.ok) throw new Error(`Falha ao listar painéis (${resp.status})`);
+  return resp.json();
+}
+
+export async function buscarInfoPainel(nome: string): Promise<InfoPainel> {
+  const resp = await fetch(`${URL_API}/api/feature-lab/paineis/${encodeURIComponent(nome)}/info`);
+  if (!resp.ok) throw new Error(`Falha ao buscar info do painel (${resp.status})`);
+  return resp.json();
+}
+
+export async function rodarFeatureLab(config: ConfigFeatureLab): Promise<ResultadoFeatureLab> {
+  const resp = await fetch(`${URL_API}/api/feature-lab/rodar`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!resp.ok) {
+    const corpo = await resp.json().catch(() => null);
+    throw new Error(corpo?.detail ?? `Falha ao rodar feature-lab (${resp.status})`);
+  }
+  return resp.json();
+}

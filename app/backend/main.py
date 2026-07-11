@@ -19,6 +19,7 @@ from typing import Annotated, Any, Literal
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from feature_lab import info_painel, listar_paineis, rodar_feature_lab
 from ingestao import (
     calcular_corte_por_percentual,
     carregar_staging,
@@ -368,3 +369,55 @@ async def rota_rodar_pipeline(config: ConfigPipeline) -> EventSourceResponse:
             yield {"event": "progresso", "data": json.dumps(item, ensure_ascii=False)}
 
     return EventSourceResponse(gerador())
+
+
+# ---------------------------------------------------------------------------
+# Feature-lab (esferas 1/2, experimental) -- ver app/backend/feature_lab.py
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/feature-lab/paineis")
+def rota_listar_paineis() -> list[str]:
+    return listar_paineis()
+
+
+@app.get("/api/feature-lab/paineis/{nome}/info")
+def rota_info_painel(nome: str) -> dict[str, Any]:
+    try:
+        return info_painel(nome)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+class ConfigFeatureLab(BaseModel):
+    painel: str
+    chave: str
+    coluna_tempo: str
+    colunas_valor: list[str]
+    janelas: list[int] = [3]
+    profundidade_maxima: int = 2
+    n_arvores: int = 60
+    min_suporte: float = 0.02
+    max_suporte: float = 0.5
+    max_regras: int = 10
+    permitir_cruzamento_entre_bases: bool = True
+
+
+@app.post("/api/feature-lab/rodar")
+def rota_rodar_feature_lab(config: ConfigFeatureLab) -> dict[str, Any]:
+    try:
+        return rodar_feature_lab(
+            painel=config.painel,
+            chave=config.chave,
+            coluna_tempo=config.coluna_tempo,
+            colunas_valor=config.colunas_valor,
+            janelas=config.janelas,
+            profundidade_maxima=config.profundidade_maxima,
+            n_arvores=config.n_arvores,
+            min_suporte=config.min_suporte,
+            max_suporte=config.max_suporte,
+            max_regras=config.max_regras,
+            permitir_cruzamento_entre_bases=config.permitir_cruzamento_entre_bases,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e

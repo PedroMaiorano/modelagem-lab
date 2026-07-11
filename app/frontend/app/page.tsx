@@ -6,6 +6,7 @@ import GraficoScoreAoVivo from "./components/GraficoScoreAoVivo";
 import ModeloAoVivo from "./components/ModeloAoVivo";
 import PainelConfig from "./components/PainelConfig";
 import PainelDatasetInfo from "./components/PainelDatasetInfo";
+import PainelFeatureLab from "./components/PainelFeatureLab";
 import PainelModulos from "./components/PainelModulos";
 import PainelUpload from "./components/PainelUpload";
 import SidebarDataset from "./components/SidebarDataset";
@@ -53,6 +54,7 @@ const ABAS = [
   { id: "modulos", rotulo: "Módulos" },
   { id: "treinamento", rotulo: "Treinamento" },
   { id: "resultados", rotulo: "Resultados" },
+  { id: "feature-lab", rotulo: "Feature-lab" },
 ] as const;
 
 type Aba = (typeof ABAS)[number]["id"];
@@ -271,6 +273,10 @@ export default function Pagina() {
               seleção&rdquo; na barra lateral.
             </p>
           )}
+        </div>
+
+        <div className={aba === "feature-lab" ? "" : "hidden"}>
+          <PainelFeatureLab />
         </div>
       </main>
     </div>
