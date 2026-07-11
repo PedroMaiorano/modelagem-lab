@@ -25,6 +25,7 @@ from agregacao_temporal import construir_agregados_janela, normalizar_safra
 from interacao import avaliar_estabilidade, extrair_candidatas
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
+from sklearn.preprocessing import StandardScaler
 
 # --- Edite aqui pra usar seus próprios dados ---------------------------------
 CAMINHO_PAINEL = Path(__file__).resolve().parent.parent / "data" / "painel_atraso" / "painel.csv"
@@ -45,14 +46,23 @@ def _imprimir_tabela(tabela: pd.DataFrame) -> None:
         print(tabela.to_string(index=False))
 
 
+def _treinar_e_medir_auc(
+    X_dev: pd.DataFrame, y_dev: pd.Series, X_teste: pd.DataFrame, y_teste: pd.Series
+) -> float:
+    # Escala (fit só em dev, aplica em teste -- mesmo padrão anti-leakage do
+    # resto do lab): `dias_atraso` (dezenas) e `renda` (milhares) em escalas
+    # bem diferentes fazem o solver do sklearn não convergir sem isso.
+    escala = StandardScaler().fit(X_dev)
+    modelo = LogisticRegression(max_iter=1000).fit(escala.transform(X_dev), y_dev)
+    return float(roc_auc_score(y_teste, modelo.predict_proba(escala.transform(X_teste))[:, 1]))
+
+
 def _auc_com_regra(regra, X_dev, y_dev, X_teste, y_teste) -> tuple[float, float]:  # type: ignore[no-untyped-def]
-    modelo_base = LogisticRegression(max_iter=1000).fit(X_dev, y_dev)
-    auc_base = roc_auc_score(y_teste, modelo_base.predict_proba(X_teste)[:, 1])
+    auc_base = _treinar_e_medir_auc(X_dev, y_dev, X_teste, y_teste)
 
     X_dev_com_regra = X_dev.assign(_regra=regra.aplicar(X_dev).astype(int))
     X_teste_com_regra = X_teste.assign(_regra=regra.aplicar(X_teste).astype(int))
-    modelo_com_regra = LogisticRegression(max_iter=1000).fit(X_dev_com_regra, y_dev)
-    auc_com_regra = roc_auc_score(y_teste, modelo_com_regra.predict_proba(X_teste_com_regra)[:, 1])
+    auc_com_regra = _treinar_e_medir_auc(X_dev_com_regra, y_dev, X_teste_com_regra, y_teste)
     return auc_base, auc_com_regra
 
 
