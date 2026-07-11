@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import SidebarFeatureLab from "../components/SidebarFeatureLab";
 import {
   buscarInfoPainel,
   buscarPreviewDataset,
@@ -17,15 +18,6 @@ import {
   type ResultadoAgregacao,
   type ResultadoFeatureLab,
 } from "../lib/api";
-
-function Secao({ titulo, children }: { titulo: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-5">
-      <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">{titulo}</h2>
-      {children}
-    </div>
-  );
-}
 
 function Metrica({ rotulo, valor }: { rotulo: string; valor: string }) {
   return (
@@ -46,22 +38,28 @@ const CAMPOS_ORDENACAO: { campo: CampoOrdenacao; rotulo: string }[] = [
   { campo: "n_variaveis", rotulo: "nº variáveis" },
 ];
 
+const ABAS = [
+  { id: "esfera1", rotulo: "Esfera 1" },
+  { id: "esfera2", rotulo: "Esfera 2" },
+  { id: "resultado", rotulo: "Resultado" },
+] as const;
+
+type Aba = (typeof ABAS)[number]["id"];
+
 //: heurística só pra sugerir default no seletor — usuário sempre pode trocar.
 const CANDIDATOS_TEMPO = new Set(["safra", "data", "mes", "tempo", "competencia", "anomes", "day"]);
 
 export default function FeatureLabPagina() {
-  // --- etapa 1: base ---
+  const [aba, setAba] = useState<Aba>("esfera1");
+
   const [bases, setBases] = useState<BaseFeatureLab[]>([]);
   const [base, setBase] = useState<BaseFeatureLab | null>(null);
   const [colunasBase, setColunasBase] = useState<string[]>([]);
+  const [colunasNumericasBase, setColunasNumericasBase] = useState<string[]>([]);
   const [info, setInfo] = useState<InfoPainel | null>(null);
-  const [colunasFlatNumericas, setColunasFlatNumericas] = useState<string[]>([]);
-  const [arquivoUpload, setArquivoUpload] = useState<File | null>(null);
-  const [nomeUpload, setNomeUpload] = useState("");
-  const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
 
-  // --- etapa 2: esfera 1 (toggle -- usuário decide, não o tipo da base) ---
-  const [usarEsfera1, setUsarEsfera1] = useState(true);
+  // --- esfera 1 ---
   const [chave, setChave] = useState("");
   const [colunaTempo, setColunaTempo] = useState("");
   const [colunasValor, setColunasValor] = useState<Set<string>>(new Set());
@@ -69,7 +67,8 @@ export default function FeatureLabPagina() {
   const [rodandoEsfera1, setRodandoEsfera1] = useState(false);
   const [resultadoEsfera1, setResultadoEsfera1] = useState<ResultadoAgregacao | null>(null);
 
-  // --- etapa 3: esfera 2 ---
+  // --- esfera 2 ---
+  const [fonteEsfera2, setFonteEsfera2] = useState<"esfera1" | "bruta">("bruta");
   const [colunasX, setColunasX] = useState<Set<string>>(new Set());
   const [profundidadeMaxima, setProfundidadeMaxima] = useState(2);
   const [nArvores, setNArvores] = useState(60);
@@ -80,9 +79,7 @@ export default function FeatureLabPagina() {
   const [rodandoEsfera2, setRodandoEsfera2] = useState(false);
   const [resultado, setResultado] = useState<ResultadoFeatureLab | null>(null);
 
-  const [erro, setErro] = useState<string | null>(null);
-
-  // --- tabela final: ordenação/filtro ---
+  // --- resultado: ordenação/filtro ---
   const [ordenarPor, setOrdenarPor] = useState<CampoOrdenacao>("iv_teste");
   const [ordemAsc, setOrdemAsc] = useState(false);
   const [ivMinimo, setIvMinimo] = useState(0);
@@ -99,17 +96,16 @@ export default function FeatureLabPagina() {
 
   // Troca de base: reseta tudo que veio de uma base anterior. Ajuste de
   // estado durante o render (padrão documentado pelo React pra "resetar
-  // estado quando uma prop muda") em vez de useEffect -- evita a cascata
-  // de re-renders de chamar setState direto no corpo de um efeito.
+  // estado quando uma prop muda") em vez de useEffect.
   const [baseAnterior, setBaseAnterior] = useState<BaseFeatureLab | null>(null);
   if (base !== baseAnterior) {
     setBaseAnterior(base);
     setInfo(null);
     setColunasBase([]);
-    setColunasFlatNumericas([]);
+    setColunasNumericasBase([]);
     setResultadoEsfera1(null);
     setResultado(null);
-    setUsarEsfera1(base?.tipo === "painel");
+    setFonteEsfera2("bruta");
   }
 
   useEffect(() => {
@@ -120,16 +116,18 @@ export default function FeatureLabPagina() {
         .then((i) => {
           setInfo(i);
           setColunasBase(i.colunas);
+          setColunasNumericasBase(i.colunas_numericas);
           setChave(i.chave_sugerida);
           setColunaTempo(i.tempo_sugerido);
           setColunasValor(new Set(i.colunas_valor_disponiveis));
+          setColunasX(new Set(i.colunas_numericas));
         })
         .catch((e) => setErro(String(e)));
     } else {
       buscarPreviewDataset(base.nome)
         .then((p) => {
           setColunasBase(p.colunas);
-          setColunasFlatNumericas(p.colunas_numericas);
+          setColunasNumericasBase(p.colunas_numericas);
           setColunasX(new Set(p.colunas_numericas));
           const chaveSugerida = p.colunas[0] ?? "";
           const tempoSugerido =
@@ -149,22 +147,11 @@ export default function FeatureLabPagina() {
     aoMudar(novo);
   }
 
-  async function aoEnviarPainel() {
-    if (!arquivoUpload || !nomeUpload.trim()) return;
-    setEnviando(true);
-    setErro(null);
-    try {
-      const infoNova = await uploadPainel(arquivoUpload, nomeUpload.trim());
-      const lista = await listarBasesFeatureLab();
-      setBases(lista);
-      setBase({ nome: infoNova.nome, tipo: "painel" });
-      setArquivoUpload(null);
-      setNomeUpload("");
-    } catch (e) {
-      setErro(String(e));
-    } finally {
-      setEnviando(false);
-    }
+  async function aoEnviarPainel(arquivo: File, nome: string) {
+    const infoNova = await uploadPainel(arquivo, nome);
+    const lista = await listarBasesFeatureLab();
+    setBases(lista);
+    setBase({ nome: infoNova.nome, tipo: "painel" });
   }
 
   async function aoRodarEsfera1() {
@@ -184,7 +171,6 @@ export default function FeatureLabPagina() {
 
     setRodandoEsfera1(true);
     setErro(null);
-    setResultado(null);
     try {
       const r = await rodarAgregacao({
         base: base.nome,
@@ -196,6 +182,7 @@ export default function FeatureLabPagina() {
       });
       setResultadoEsfera1(r);
       setColunasX(new Set(r.colunas_geradas));
+      setFonteEsfera2("esfera1");
     } catch (e) {
       setErro(String(e));
     } finally {
@@ -212,7 +199,6 @@ export default function FeatureLabPagina() {
 
     setRodandoEsfera2(true);
     setErro(null);
-    setResultado(null);
     const parametros = {
       profundidade_maxima: profundidadeMaxima,
       n_arvores: nArvores,
@@ -223,8 +209,8 @@ export default function FeatureLabPagina() {
     };
     try {
       let r: ResultadoFeatureLab;
-      if (usarEsfera1) {
-        if (!resultadoEsfera1) throw new Error("Rode a esfera 1 primeiro.");
+      if (fonteEsfera2 === "esfera1") {
+        if (!resultadoEsfera1) throw new Error("Rode a esfera 1 primeiro, ou troque a fonte pra 'colunas cruas'.");
         r = await descobrirEmTabela({ tabela: resultadoEsfera1.tabela, colunas_x: [...colunasX], ...parametros });
       } else if (base.tipo === "flat") {
         r = await rodarDireto({ dataset: base.nome, colunas_x: [...colunasX], ...parametros });
@@ -233,6 +219,7 @@ export default function FeatureLabPagina() {
         r = await descobrirEmTabela({ tabela: bruta.tabela, colunas_x: [...colunasX], ...parametros });
       }
       setResultado(r);
+      setAba("resultado");
     } catch (e) {
       setErro(String(e));
     } finally {
@@ -248,16 +235,10 @@ export default function FeatureLabPagina() {
     }
   }
 
-  // Candidatas quando a esfera 1 tá desligada: coluna numérica de verdade
-  // (nunca depende de qual coluna foi escolhida como chave/tempo -- bug
-  // real visto na tela, "contrato"/"safra" sumiam da lista sem motivo).
-  const colunasNumericasBase = base?.tipo === "painel" ? (info?.colunas_numericas ?? []) : colunasFlatNumericas;
   const colunasGeradasComIv = [...(resultadoEsfera1?.colunas_geradas ?? [])].sort(
     (a, b) => (resultadoEsfera1?.ivs[b] ?? 0) - (resultadoEsfera1?.ivs[a] ?? 0),
   );
-
-  const esfera2Liberada = usarEsfera1 ? resultadoEsfera1 !== null : colunasNumericasBase.length > 0;
-  const colunasParaEsfera2 = usarEsfera1 ? (resultadoEsfera1?.colunas_geradas ?? []) : colunasNumericasBase;
+  const colunasParaEsfera2 = fonteEsfera2 === "esfera1" ? (resultadoEsfera1?.colunas_geradas ?? []) : colunasNumericasBase;
 
   const regrasFiltradas: RegraFeatureLab[] = (resultado?.regras ?? [])
     .filter((r) => r.iv_teste >= ivMinimo)
@@ -269,416 +250,415 @@ export default function FeatureLabPagina() {
     .sort((a, b) => (ordemAsc ? 1 : -1) * (a[ordenarPor] - b[ordenarPor]));
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 p-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-slate-100">Feature-lab</h1>
-          <p className="text-sm text-slate-500">
-            Base → agregação (esfera 1, opcional) → descoberta de interação (esfera 2).
-          </p>
-        </div>
-        <Link href="/" className="text-xs text-slate-500 hover:text-emerald-400">
-          ← voltar pro Pedro_Wise
-        </Link>
-      </header>
+    <div className="flex h-screen">
+      <SidebarFeatureLab bases={bases} base={base} aoMudarBase={setBase} aoEnviarPainel={aoEnviarPainel} />
 
-      {/* Etapa 1: base ------------------------------------------------- */}
-      <Secao titulo="1. Base">
-        <div className="flex flex-wrap items-end gap-4">
+      <main className="flex-1 overflow-y-auto p-6">
+        <header className="mb-6 flex items-center justify-between">
           <div>
-            <label className="mb-1 block text-[11px] text-slate-500">dataset</label>
-            <select
-              value={base ? `${base.tipo}:${base.nome}` : ""}
-              onChange={(e) => {
-                const [tipo, nome] = e.target.value.split(":");
-                setBase({ tipo: tipo as BaseFeatureLab["tipo"], nome });
-              }}
-              className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+            <h1 className="text-lg font-semibold text-slate-100">Feature-lab</h1>
+            <p className="text-sm text-slate-500">
+              {base ? `Base: ${base.nome}` : "Escolha uma base na barra lateral"}
+              {info && ` — ${info.n_linhas.toLocaleString("pt-BR")} linhas, ${info.n_chaves.toLocaleString("pt-BR")} chaves`}
+            </p>
+          </div>
+          <Link href="/" className="text-xs text-slate-500 hover:text-emerald-400">
+            ← voltar pro Pedro_Wise
+          </Link>
+        </header>
+
+        <nav className="mb-6 flex gap-1 rounded-lg bg-slate-900/70 p-1 w-fit">
+          {ABAS.map((a) => (
+            <button
+              key={a.id}
+              onClick={() => setAba(a.id)}
+              className={`rounded-md px-4 py-1.5 text-sm font-medium transition ${
+                aba === a.id ? "bg-slate-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"
+              }`}
             >
-              {bases.map((b) => (
-                <option key={`${b.tipo}:${b.nome}`} value={`${b.tipo}:${b.nome}`}>
-                  {b.nome} ({b.tipo === "painel" ? "painel" : "flat"})
-                </option>
-              ))}
-            </select>
-          </div>
-          {info && (
-            <p className="text-xs text-slate-500">
-              {info.n_linhas.toLocaleString("pt-BR")} linhas, {info.n_chaves.toLocaleString("pt-BR")} chaves
-            </p>
-          )}
-        </div>
+              {a.rotulo}
+            </button>
+          ))}
+        </nav>
 
-        <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-slate-800 pt-4">
-          <div>
-            <label className="mb-1 block text-[11px] text-slate-500">enviar novo painel (CSV)</label>
-            <input
-              type="file"
-              accept=".csv"
-              onChange={(e) => setArquivoUpload(e.target.files?.[0] ?? null)}
-              className="block text-xs text-slate-400 file:mr-2 file:rounded file:border-0 file:bg-slate-700 file:px-2 file:py-1 file:text-xs file:text-slate-200"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-[11px] text-slate-500">nome</label>
-            <input
-              type="text"
-              value={nomeUpload}
-              onChange={(e) => setNomeUpload(e.target.value)}
-              placeholder="meu-painel"
-              className="w-36 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-            />
-          </div>
-          <button
-            onClick={aoEnviarPainel}
-            disabled={enviando || !arquivoUpload || !nomeUpload.trim()}
-            className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-700 hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {enviando ? "Enviando…" : "Enviar painel"}
-          </button>
-        </div>
-      </Secao>
+        {erro && <p className="mb-4 text-sm text-red-400">{erro}</p>}
 
-      {/* Etapa 2: esfera 1 -- card persistente (nunca some/reaparece de
-          tamanho diferente): o toggle mora no próprio cabeçalho, só o
-          CONTEÚDO colapsa quando desligado. */}
-      {base && colunasBase.length > 0 && (
-        <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              2. Esfera 1 — agregação temporal
-            </h2>
-            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={usarEsfera1}
-                onChange={(e) => setUsarEsfera1(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
-              />
-              usar esfera 1
-            </label>
-          </div>
-
-          {!usarEsfera1 ? (
-            <p className="text-xs text-slate-500">
-              Desligada — a esfera 2 abaixo usa as colunas numéricas da base direto, sem agregar.
-            </p>
-          ) : (
-            <>
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-wrap gap-4">
-                  <div>
-                    <label className="mb-1 block text-[11px] text-slate-500">chave</label>
-                    <select
-                      value={chave}
-                      onChange={(e) => setChave(e.target.value)}
-                      className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-                    >
-                      {colunasBase.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-[11px] text-slate-500">coluna de tempo/safra</label>
-                    <select
-                      value={colunaTempo}
-                      onChange={(e) => setColunaTempo(e.target.value)}
-                      className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-                    >
-                      {colunasBase.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <p className="mb-1.5 text-[11px] text-slate-500">
-                    colunas brutas a agregar (máximo/média/mínimo/desvio/tendência por janela)
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {colunasBase
-                      .filter((c) => c !== chave && c !== colunaTempo && c !== "y")
-                      .map((c) => (
-                        <label
-                          key={c}
-                          className="flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={colunasValor.has(c)}
-                            onChange={() => alternar(colunasValor, c, setColunasValor)}
-                            className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
-                          />
-                          {c}
-                        </label>
-                      ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="mb-1 block text-[11px] text-slate-500">
-                    janelas (períodos, separadas por vírgula)
-                  </label>
-                  <input
-                    type="text"
-                    value={janelasTexto}
-                    onChange={(e) => setJanelasTexto(e.target.value)}
-                    placeholder="3,6,12"
-                    className="w-32 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-                  />
-                </div>
-              </div>
-              <button
-                onClick={aoRodarEsfera1}
-                disabled={rodandoEsfera1}
-                className="mt-4 rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {rodandoEsfera1 ? "Rodando…" : "Rodar esfera 1"}
-              </button>
-
-              {resultadoEsfera1 && (
-                <div className="mt-4 border-t border-slate-800 pt-4">
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <Metrica
-                      rotulo="linhas do painel"
-                      valor={resultadoEsfera1.n_linhas_painel.toLocaleString("pt-BR")}
-                    />
-                    <Metrica rotulo="chaves" valor={resultadoEsfera1.n_chaves.toLocaleString("pt-BR")} />
-                    <Metrica rotulo="colunas geradas" valor={String(resultadoEsfera1.colunas_geradas.length)} />
-                    <Metrica
-                      rotulo="linhas resultantes"
-                      valor={resultadoEsfera1.tabela.length.toLocaleString("pt-BR")}
-                    />
-                  </div>
-
-                  <p className="mb-1.5 mt-4 text-[11px] text-slate-500">
-                    colunas geradas, por IV individual (sozinha, antes de qualquer combinação)
-                  </p>
-                  <div className="max-h-52 overflow-y-auto rounded-lg border border-slate-700">
-                    <table className="w-full text-xs">
-                      <thead className="sticky top-0 bg-slate-800/90 text-slate-400">
-                        <tr>
-                          <th className="px-3 py-1.5 text-left font-medium">coluna</th>
-                          <th className="px-3 py-1.5 text-right font-medium">IV</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {colunasGeradasComIv.map((c, i) => (
-                          <tr key={c} className={i % 2 === 0 ? "bg-slate-900/40" : "bg-slate-900/70"}>
-                            <td className="px-3 py-1 font-mono text-slate-300">{c}</td>
-                            <td className="px-3 py-1 text-right tabular-nums text-emerald-400">
-                              {(resultadoEsfera1.ivs[c] ?? 0).toFixed(3)}
-                            </td>
-                          </tr>
+        {!base ? (
+          <p className="text-sm text-slate-600">Escolha uma base na barra lateral primeiro.</p>
+        ) : (
+          <>
+            <div className={aba === "esfera1" ? "" : "hidden"}>
+              <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-5">
+                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Agregação temporal
+                </h2>
+                <p className="mb-4 text-xs text-slate-500">
+                  Opcional — gera máximo/média/mínimo/desvio/tendência sobre janela móvel, agrupado por
+                  chave. Pule esta aba se sua base não tem granularidade de painel.
+                </p>
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap gap-4">
+                    <div>
+                      <label className="mb-1 block text-[11px] text-slate-500">chave</label>
+                      <select
+                        value={chave}
+                        onChange={(e) => setChave(e.target.value)}
+                        className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                      >
+                        {colunasBase.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
                         ))}
-                      </tbody>
-                    </table>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] text-slate-500">coluna de tempo/safra</label>
+                      <select
+                        value={colunaTempo}
+                        onChange={(e) => setColunaTempo(e.target.value)}
+                        className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                      >
+                        {colunasBase.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="mb-1.5 text-[11px] text-slate-500">
+                      colunas brutas a agregar (máximo/média/mínimo/desvio/tendência por janela)
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {colunasBase
+                        .filter((c) => c !== chave && c !== colunaTempo && c !== "y")
+                        .map((c) => (
+                          <label
+                            key={c}
+                            className="flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={colunasValor.has(c)}
+                              onChange={() => alternar(colunasValor, c, setColunasValor)}
+                              className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+                            />
+                            {c}
+                          </label>
+                        ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-500">
+                      janelas (períodos, separadas por vírgula)
+                    </label>
+                    <input
+                      type="text"
+                      value={janelasTexto}
+                      onChange={(e) => setJanelasTexto(e.target.value)}
+                      placeholder="3,6,12"
+                      className="w-32 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                    />
                   </div>
                 </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Etapa 3: esfera 2 -------------------------------------------------- */}
-      {esfera2Liberada && (
-        <Secao titulo={`${usarEsfera1 ? "3" : "2"}. Esfera 2 — descoberta de interação`}>
-          <div className="mb-4">
-            <p className="mb-1.5 text-[11px] text-slate-500">colunas candidatas</p>
-            <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">
-              {colunasParaEsfera2.map((c) => (
-                <label
-                  key={c}
-                  className="flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
+                <button
+                  onClick={aoRodarEsfera1}
+                  disabled={rodandoEsfera1}
+                  className="mt-4 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
+                  {rodandoEsfera1 ? "Rodando…" : "Rodar esfera 1"}
+                </button>
+
+                {resultadoEsfera1 && (
+                  <div className="mt-4 border-t border-slate-800 pt-4">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      <Metrica
+                        rotulo="linhas do painel"
+                        valor={resultadoEsfera1.n_linhas_painel.toLocaleString("pt-BR")}
+                      />
+                      <Metrica rotulo="chaves" valor={resultadoEsfera1.n_chaves.toLocaleString("pt-BR")} />
+                      <Metrica rotulo="colunas geradas" valor={String(resultadoEsfera1.colunas_geradas.length)} />
+                      <Metrica
+                        rotulo="linhas resultantes"
+                        valor={resultadoEsfera1.tabela.length.toLocaleString("pt-BR")}
+                      />
+                    </div>
+
+                    <p className="mb-1.5 mt-4 text-[11px] text-slate-500">
+                      colunas geradas, por IV individual (sozinha, antes de qualquer combinação)
+                    </p>
+                    <div className="max-h-52 overflow-y-auto rounded-lg border border-slate-700">
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-slate-800/90 text-slate-400">
+                          <tr>
+                            <th className="px-3 py-1.5 text-left font-medium">coluna</th>
+                            <th className="px-3 py-1.5 text-right font-medium">IV</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {colunasGeradasComIv.map((c, i) => (
+                            <tr key={c} className={i % 2 === 0 ? "bg-slate-900/40" : "bg-slate-900/70"}>
+                              <td className="px-3 py-1 font-mono text-slate-300">{c}</td>
+                              <td className="px-3 py-1 text-right tabular-nums text-emerald-400">
+                                {(resultadoEsfera1.ivs[c] ?? 0).toFixed(3)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="mt-3 text-xs text-slate-500">
+                      Pronto — vá pra aba <span className="text-slate-300">Esfera 2</span> pra descobrir
+                      interações a partir dessas colunas.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className={aba === "esfera2" ? "" : "hidden"}>
+              <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-5">
+                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Descoberta de interação
+                </h2>
+
+                <div className="mb-4">
+                  <p className="mb-1.5 text-[11px] text-slate-500">fonte das colunas candidatas</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setFonteEsfera2("bruta")}
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                        fonteEsfera2 === "bruta"
+                          ? "border-emerald-600 bg-emerald-950/40 text-emerald-300"
+                          : "border-slate-700 bg-slate-800/60 text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      colunas da base (sem agregação)
+                    </button>
+                    <button
+                      onClick={() => setFonteEsfera2("esfera1")}
+                      disabled={!resultadoEsfera1}
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                        fonteEsfera2 === "esfera1"
+                          ? "border-emerald-600 bg-emerald-950/40 text-emerald-300"
+                          : "border-slate-700 bg-slate-800/60 text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      resultado da esfera 1{!resultadoEsfera1 && " (rode a esfera 1 primeiro)"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mb-4">
+                  <p className="mb-1.5 text-[11px] text-slate-500">colunas candidatas</p>
+                  <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">
+                    {colunasParaEsfera2.map((c) => (
+                      <label
+                        key={c}
+                        className="flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={colunasX.has(c)}
+                          onChange={() => alternar(colunasX, c, setColunasX)}
+                          className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+                        />
+                        {c}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-500">profundidade máxima</label>
+                    <input
+                      type="number"
+                      min={2}
+                      max={6}
+                      value={profundidadeMaxima}
+                      onChange={(e) => setProfundidadeMaxima(Number(e.target.value))}
+                      className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-500">nº árvores</label>
+                    <input
+                      type="number"
+                      min={10}
+                      max={300}
+                      value={nArvores}
+                      onChange={(e) => setNArvores(Number(e.target.value))}
+                      className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-500">suporte mínimo</label>
+                    <input
+                      type="number"
+                      step={0.01}
+                      min={0}
+                      max={1}
+                      value={minSuporte}
+                      onChange={(e) => setMinSuporte(Number(e.target.value))}
+                      className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-500">suporte máximo</label>
+                    <input
+                      type="number"
+                      step={0.01}
+                      min={0}
+                      max={1}
+                      value={maxSuporte}
+                      onChange={(e) => setMaxSuporte(Number(e.target.value))}
+                      className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-500">máx. regras exibidas</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={maxRegras}
+                      onChange={(e) => setMaxRegras(Number(e.target.value))}
+                      className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                    />
+                  </div>
+                </div>
+                <label className="mt-4 flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={colunasX.has(c)}
-                    onChange={() => alternar(colunasX, c, setColunasX)}
-                    className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+                    checked={permitirCruzamento}
+                    onChange={(e) => setPermitirCruzamento(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
                   />
-                  {c}
+                  Permitir cruzar variáveis brutas diferentes numa mesma regra
                 </label>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-            <div>
-              <label className="mb-1 block text-[11px] text-slate-500">profundidade máxima</label>
-              <input
-                type="number"
-                min={2}
-                max={6}
-                value={profundidadeMaxima}
-                onChange={(e) => setProfundidadeMaxima(Number(e.target.value))}
-                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-[11px] text-slate-500">nº árvores</label>
-              <input
-                type="number"
-                min={10}
-                max={300}
-                value={nArvores}
-                onChange={(e) => setNArvores(Number(e.target.value))}
-                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-[11px] text-slate-500">suporte mínimo</label>
-              <input
-                type="number"
-                step={0.01}
-                min={0}
-                max={1}
-                value={minSuporte}
-                onChange={(e) => setMinSuporte(Number(e.target.value))}
-                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-[11px] text-slate-500">suporte máximo</label>
-              <input
-                type="number"
-                step={0.01}
-                min={0}
-                max={1}
-                value={maxSuporte}
-                onChange={(e) => setMaxSuporte(Number(e.target.value))}
-                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-[11px] text-slate-500">máx. regras exibidas</label>
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={maxRegras}
-                onChange={(e) => setMaxRegras(Number(e.target.value))}
-                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-              />
-            </div>
-          </div>
-          <label className="mt-4 flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={permitirCruzamento}
-              onChange={(e) => setPermitirCruzamento(e.target.checked)}
-              className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
-            />
-            Permitir cruzar variáveis brutas diferentes numa mesma regra
-          </label>
-          <p className="mt-1 text-xs text-slate-500">
-            Desmarcado: cada regra só combina primitivas da mesma variável bruta — útil se regra de
-            negócio não quer misturar domínios diferentes numa condição só.
-          </p>
-
-          <button
-            onClick={aoRodarEsfera2}
-            disabled={rodandoEsfera2}
-            className="mt-4 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {rodandoEsfera2 ? "Rodando…" : "Rodar esfera 2"}
-          </button>
-        </Secao>
-      )}
-
-      {erro && <p className="text-sm text-red-400">{erro}</p>}
-
-      {/* Resultado -------------------------------------------------------- */}
-      {resultado && (
-        <Secao titulo="Resultado">
-          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            <Metrica rotulo="colunas candidatas" valor={String(resultado.colunas_x.length)} />
-            <Metrica rotulo="dev / teste" valor={`${resultado.n_dev} / ${resultado.n_teste}`} />
-            <Metrica rotulo="taxa evento dev" valor={`${(resultado.taxa_evento_dev * 100).toFixed(1)}%`} />
-            <Metrica rotulo="taxa evento teste" valor={`${(resultado.taxa_evento_teste * 100).toFixed(1)}%`} />
-            <Metrica rotulo="tempo de execução" valor={`${resultado.tempo_execucao_segundos.toFixed(2)}s`} />
-          </div>
-
-          {resultado.regras.length === 0 ? (
-            <p className="text-sm text-slate-500">
-              Nenhuma regra sobreviveu aos filtros de suporte — tente ajustar suporte mínimo/máximo
-              ou profundidade.
-            </p>
-          ) : (
-            <>
-              <div className="mb-3 flex flex-wrap items-end gap-4">
-                <div>
-                  <label className="mb-1 block text-[11px] text-slate-500">IV mínimo (teste)</label>
-                  <input
-                    type="number"
-                    step={0.01}
-                    min={0}
-                    value={ivMinimo}
-                    onChange={(e) => setIvMinimo(Number(e.target.value))}
-                    className="w-24 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1 text-sm text-slate-100"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-[11px] text-slate-500">nº variáveis</label>
-                  <select
-                    value={nVariaveisFiltro}
-                    onChange={(e) => setNVariaveisFiltro(e.target.value as "todas" | "1" | "2+")}
-                    className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1 text-sm text-slate-100"
-                  >
-                    <option value="todas">todas</option>
-                    <option value="1">só 1 (mesma base)</option>
-                    <option value="2+">2+ (cruzadas)</option>
-                  </select>
-                </div>
-                <p className="text-xs text-slate-500">
-                  {regrasFiltradas.length} de {resultado.regras.length} regras — clique nos cabeçalhos pra ordenar
+                <p className="mt-1 text-xs text-slate-500">
+                  Desmarcado: cada regra só combina primitivas da mesma variável bruta — útil se regra de
+                  negócio não quer misturar domínios diferentes numa condição só.
                 </p>
-              </div>
 
-              <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-700">
-                <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-slate-800/90 text-slate-400">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-medium">regra</th>
-                      {CAMPOS_ORDENACAO.map(({ campo, rotulo }) => (
-                        <th
-                          key={campo}
-                          onClick={() => alternarOrdenacao(campo)}
-                          className="cursor-pointer select-none px-3 py-2 text-right font-medium hover:text-slate-200"
-                        >
-                          {rotulo}
-                          {ordenarPor === campo && (ordemAsc ? " ↑" : " ↓")}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {regrasFiltradas.map((r, i) => (
-                      <tr key={i} className={i % 2 === 0 ? "bg-slate-900/40" : "bg-slate-900/70"}>
-                        <td className="px-3 py-1.5 font-mono text-slate-300">{r.regra}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
-                          {r.iv_teste.toFixed(3)}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">{r.iv_dev.toFixed(3)}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">
-                          {r.suporte_teste.toFixed(3)}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">{r.n_condicoes}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">{r.n_variaveis}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <button
+                  onClick={aoRodarEsfera2}
+                  disabled={rodandoEsfera2}
+                  className="mt-4 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {rodandoEsfera2 ? "Rodando…" : "Rodar esfera 2"}
+                </button>
               </div>
-            </>
-          )}
-        </Secao>
-      )}
+            </div>
+
+            <div className={aba === "resultado" ? "" : "hidden"}>
+              {!resultado ? (
+                <p className="text-sm text-slate-600">
+                  Nenhum resultado ainda — configure na aba &ldquo;Esfera 2&rdquo; e rode.
+                </p>
+              ) : (
+                <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-5">
+                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Resultado</h2>
+                  <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                    <Metrica rotulo="colunas candidatas" valor={String(resultado.colunas_x.length)} />
+                    <Metrica rotulo="dev / teste" valor={`${resultado.n_dev} / ${resultado.n_teste}`} />
+                    <Metrica rotulo="taxa evento dev" valor={`${(resultado.taxa_evento_dev * 100).toFixed(1)}%`} />
+                    <Metrica
+                      rotulo="taxa evento teste"
+                      valor={`${(resultado.taxa_evento_teste * 100).toFixed(1)}%`}
+                    />
+                    <Metrica rotulo="tempo de execução" valor={`${resultado.tempo_execucao_segundos.toFixed(2)}s`} />
+                  </div>
+
+                  {resultado.regras.length === 0 ? (
+                    <p className="text-sm text-slate-500">
+                      Nenhuma regra sobreviveu aos filtros de suporte — tente ajustar suporte
+                      mínimo/máximo ou profundidade na aba Esfera 2.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="mb-3 flex flex-wrap items-end gap-4">
+                        <div>
+                          <label className="mb-1 block text-[11px] text-slate-500">IV mínimo (teste)</label>
+                          <input
+                            type="number"
+                            step={0.01}
+                            min={0}
+                            value={ivMinimo}
+                            onChange={(e) => setIvMinimo(Number(e.target.value))}
+                            className="w-24 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1 text-sm text-slate-100"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-slate-500">nº variáveis</label>
+                          <select
+                            value={nVariaveisFiltro}
+                            onChange={(e) => setNVariaveisFiltro(e.target.value as "todas" | "1" | "2+")}
+                            className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1 text-sm text-slate-100"
+                          >
+                            <option value="todas">todas</option>
+                            <option value="1">só 1 (mesma base)</option>
+                            <option value="2+">2+ (cruzadas)</option>
+                          </select>
+                        </div>
+                        <p className="text-xs text-slate-500">
+                          {regrasFiltradas.length} de {resultado.regras.length} regras — clique nos
+                          cabeçalhos pra ordenar
+                        </p>
+                      </div>
+
+                      <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-700">
+                        <table className="w-full text-xs">
+                          <thead className="sticky top-0 bg-slate-800/90 text-slate-400">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-medium">regra</th>
+                              {CAMPOS_ORDENACAO.map(({ campo, rotulo }) => (
+                                <th
+                                  key={campo}
+                                  onClick={() => alternarOrdenacao(campo)}
+                                  className="cursor-pointer select-none px-3 py-2 text-right font-medium hover:text-slate-200"
+                                >
+                                  {rotulo}
+                                  {ordenarPor === campo && (ordemAsc ? " ↑" : " ↓")}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {regrasFiltradas.map((r, i) => (
+                              <tr key={i} className={i % 2 === 0 ? "bg-slate-900/40" : "bg-slate-900/70"}>
+                                <td className="px-3 py-1.5 font-mono text-slate-300">{r.regra}</td>
+                                <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
+                                  {r.iv_teste.toFixed(3)}
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">
+                                  {r.iv_dev.toFixed(3)}
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">
+                                  {r.suporte_teste.toFixed(3)}
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">
+                                  {r.n_condicoes}
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">
+                                  {r.n_variaveis}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </main>
     </div>
   );
 }
