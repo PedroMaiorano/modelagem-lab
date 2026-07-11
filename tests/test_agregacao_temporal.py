@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-from agregacao_temporal import construir_agregados_janela
+from agregacao_temporal import construir_agregados_janela, extrair_base_agregado
 from agregacao_temporal.primitivas import _slope
 
 
@@ -110,3 +110,14 @@ def test_nao_modifica_painel_original():
     colunas_antes = list(painel.columns)
     construir_agregados_janela(painel, "contrato", "mes", "atraso", janelas=[3])
     assert list(painel.columns) == colunas_antes
+
+
+def test_extrair_base_agregado_reverte_a_convencao_de_nomes():
+    assert extrair_base_agregado("dias_atraso_tendencia_3m") == "dias_atraso"
+    assert extrair_base_agregado("renda_maximo_12m") == "renda"
+    assert extrair_base_agregado("saldo_devedor_desvio_padrao_6m") == "saldo_devedor"
+
+
+def test_extrair_base_agregado_coluna_sem_sufixo_volta_igual():
+    assert extrair_base_agregado("renda") == "renda"
+    assert extrair_base_agregado("dias_atraso") == "dias_atraso"

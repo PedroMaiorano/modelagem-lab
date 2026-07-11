@@ -7,6 +7,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+from agregacao_temporal import extrair_base_agregado
 from interacao import Condicao, Regra, extrair_candidatas, regras_para_colunas
 
 
@@ -90,3 +91,44 @@ def test_y_constante_nao_quebra_extracao():
     y = pd.Series([0, 0, 0])
     with pytest.raises(ValueError):
         extrair_candidatas(X, y, n_arvores=5)
+
+
+def _dataset_interacao_cruzada(n: int = 3000, semente: int = 0) -> tuple[pd.DataFrame, pd.Series]:
+    """Sinal de verdade é uma interação ENTRE bases (atraso x renda) -- nomes
+    de coluna seguem a convenção `{base}_{primitiva}_{n}m` de
+    agregacao_temporal, então `extrair_base_agregado` (usado por padrão)
+    reconhece "atraso" e "renda" como bases diferentes.
+    """
+    rng = np.random.default_rng(semente)
+    atraso_maximo = rng.normal(0, 1, n)
+    renda_tendencia = rng.normal(0, 1, n)
+    logit_p = -3.0 + 6.0 * ((atraso_maximo > 0) & (renda_tendencia < 0)).astype(float)
+    p = 1 / (1 + np.exp(-logit_p))
+    y = pd.Series(rng.binomial(1, p))
+    X = pd.DataFrame(
+        {
+            "atraso_maximo_3m": atraso_maximo,
+            "renda_tendencia_3m": renda_tendencia,
+        }
+    )
+    return X, y
+
+
+def test_permite_cruzamento_entre_bases_por_padrao():
+    X, y = _dataset_interacao_cruzada()
+    regras = extrair_candidatas(X, y, profundidade_maxima=2, n_arvores=30, semente=0)
+
+    assert len(regras) > 0
+    bases_da_melhor = {extrair_base_agregado(c.feature) for c in regras[0].condicoes}
+    assert bases_da_melhor == {"atraso", "renda"}  # cruzou as duas bases, como esperado
+
+
+def test_restringir_a_mesma_base_bloqueia_regra_cruzada():
+    X, y = _dataset_interacao_cruzada()
+    regras = extrair_candidatas(
+        X, y, profundidade_maxima=2, n_arvores=30, semente=0, permitir_cruzamento_entre_bases=False
+    )
+
+    for regra in regras:
+        bases = {extrair_base_agregado(c.feature) for c in regra.condicoes}
+        assert len(bases) == 1  # nenhuma regra devolvida mistura atraso com renda

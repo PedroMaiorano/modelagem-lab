@@ -16,10 +16,12 @@ o que entra no modelo).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
 import pandas as pd
+from agregacao_temporal import extrair_base_agregado
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.tree._tree import TREE_UNDEFINED
 from transformacao.woe import ajustar_woe
@@ -88,12 +90,25 @@ def extrair_candidatas(
     max_suporte: float = 0.5,
     max_regras: int = 30,
     semente: int | None = 0,
+    permitir_cruzamento_entre_bases: bool = True,
+    base_de: Callable[[str], str] = extrair_base_agregado,
 ) -> list[Regra]:
     """Treina um `GradientBoostingClassifier` raso sobre `X`/`y` e extrai
     regras de interação (>= 2 condições) dos caminhos das árvores.
 
+    `permitir_cruzamento_entre_bases=False` restringe as regras a combinarem
+    só primitivas da MESMA variável bruta (ex.: `atraso_tendencia_3m` com
+    `atraso_maximo_3m`, nunca com `renda_tendencia_3m`) — útil quando regra
+    de negócio não quer misturar domínios diferentes numa única condição
+    (fica difícil de explicar/auditar). `base_de` identifica a variável
+    bruta por trás do nome da coluna; o default (`extrair_base_agregado`)
+    reverte a convenção de nomes de `agregacao_temporal.construir_agregados_janela` —
+    troque se suas colunas seguirem outra convenção.
+
     Filtros aplicados, nessa ordem:
     - só caminhos com 2+ condições (interação de verdade, não univariado);
+    - se `permitir_cruzamento_entre_bases=False`, descarta caminhos cujas
+      condições vêm de mais de uma base;
     - deduplicação (a mesma regra pode aparecer em várias árvores);
     - suporte entre `min_suporte` e `max_suporte` (fração de linhas que
       satisfaz a regra) — descarta regras triviais (quase sempre ou quase
@@ -117,6 +132,10 @@ def extrair_candidatas(
         for caminho in _caminhos_da_arvore(arvore.tree_, colunas):
             if len(caminho) < 2:
                 continue
+            if not permitir_cruzamento_entre_bases:
+                bases = {base_de(c.feature) for c in caminho}
+                if len(bases) > 1:
+                    continue
             chave = frozenset((c.feature, c.operador, round(c.limiar, 6)) for c in caminho)
             if chave in vistas:
                 continue

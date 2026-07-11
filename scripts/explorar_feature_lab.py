@@ -1,7 +1,12 @@
 """Script pra explorar o feature-lab (esferas 1 e 2) sem precisar de UI ou
 notebook -- roda no terminal, imprime os resultados. Pensado pra editar e
-reexecutar: troque `CAMINHO_PAINEL`/`JANELAS`/`COLUNA_VALOR` pelos seus
+reexecutar: troque `CAMINHO_PAINEL`/`JANELAS`/`COLUNAS_VALOR` pelos seus
 dados reais quando quiser sair do sintético.
+
+Compara os dois modos de `extrair_candidatas`: livre (pode cruzar variáveis
+brutas diferentes) vs. restrito à mesma base (regra de negócio que não quer
+misturar domínios numa condição só) -- o dataset sintético tem sinal nos
+dois formatos de propósito, pra deixar a diferença visível.
 
 Uso: `python scripts/explorar_feature_lab.py`
 (rode antes `python scripts/gerar_dataset_painel_atraso.py` se
@@ -30,9 +35,25 @@ CAMINHO_PAINEL = Path(__file__).resolve().parent.parent / "data" / "painel_atras
 CAMINHO_ALVO: Path | None = Path(__file__).resolve().parent.parent / "data" / "painel_atraso" / "agregado.csv"
 CHAVE = "contrato"
 COLUNA_SAFRA = "safra"
-COLUNA_VALOR = "dias_atraso"
-JANELAS = [3, 6]
+COLUNAS_VALOR = ["dias_atraso", "renda"]
+JANELAS = [3]
 # ------------------------------------------------------------------------------
+
+
+def _imprimir_tabela(tabela: pd.DataFrame) -> None:
+    with pd.option_context("display.width", 160, "display.max_colwidth", 60):
+        print(tabela.to_string(index=False))
+
+
+def _auc_com_regra(regra, X_dev, y_dev, X_teste, y_teste) -> tuple[float, float]:  # type: ignore[no-untyped-def]
+    modelo_base = LogisticRegression(max_iter=1000).fit(X_dev, y_dev)
+    auc_base = roc_auc_score(y_teste, modelo_base.predict_proba(X_teste)[:, 1])
+
+    X_dev_com_regra = X_dev.assign(_regra=regra.aplicar(X_dev).astype(int))
+    X_teste_com_regra = X_teste.assign(_regra=regra.aplicar(X_teste).astype(int))
+    modelo_com_regra = LogisticRegression(max_iter=1000).fit(X_dev_com_regra, y_dev)
+    auc_com_regra = roc_auc_score(y_teste, modelo_com_regra.predict_proba(X_teste_com_regra)[:, 1])
+    return auc_base, auc_com_regra
 
 
 def main() -> None:
@@ -45,14 +66,19 @@ def main() -> None:
     painel["safra_norm"] = normalizar_safra(painel[COLUNA_SAFRA])
     painel = painel.sort_values([CHAVE, "safra_norm"]).reset_index(drop=True)
 
-    print(f"Painel: {len(painel)} linhas, {painel[CHAVE].nunique()} chaves, "
-          f"{painel['safra_norm'].nunique()} safras")
+    print(
+        f"Painel: {len(painel)} linhas, {painel[CHAVE].nunique()} chaves, "
+        f"{painel['safra_norm'].nunique()} safras, variáveis brutas: {COLUNAS_VALOR}"
+    )
 
     print("\n== Esfera 1: agregação temporal ==")
-    agregado = construir_agregados_janela(
-        painel, chave=CHAVE, tempo="safra_norm", valor=COLUNA_VALOR, janelas=JANELAS
-    )
-    colunas_geradas = [c for c in agregado.columns if c.startswith(f"{COLUNA_VALOR}_")]
+    agregado = painel
+    colunas_geradas: list[str] = []
+    for valor in COLUNAS_VALOR:
+        agregado = construir_agregados_janela(
+            agregado, chave=CHAVE, tempo="safra_norm", valor=valor, janelas=JANELAS
+        )
+        colunas_geradas += [c for c in agregado.columns if c.startswith(f"{valor}_")]
     print(f"Colunas geradas: {colunas_geradas}")
 
     # Ponto de observação por contrato = último mês -- ajuste se seu caso for diferente.
@@ -71,36 +97,36 @@ def main() -> None:
     X_dev, y_dev = dev[colunas_geradas], dev["y"]
     X_teste, y_teste = teste[colunas_geradas], teste["y"]
 
-    print(f"\nSplit dev/teste: {len(dev)} / {len(teste)} contratos, "
-          f"taxa de evento dev={y_dev.mean():.1%} teste={y_teste.mean():.1%}")
+    print(
+        f"\nSplit dev/teste: {len(dev)} / {len(teste)} contratos, "
+        f"taxa de evento dev={y_dev.mean():.1%} teste={y_teste.mean():.1%}"
+    )
 
-    print("\n== Esfera 2: descoberta de interação (RuleFit-style) ==")
-    regras = extrair_candidatas(X_dev, y_dev, profundidade_maxima=2, n_arvores=60, max_regras=5, semente=0)
-    if not regras:
-        print("Nenhuma regra sobreviveu aos filtros de suporte -- tente ajustar min_suporte/max_suporte.")
-        return
+    for titulo, permitir_cruzamento in [
+        ("permitir_cruzamento_entre_bases=True (livre)", True),
+        ("permitir_cruzamento_entre_bases=False (só mesma variável bruta)", False),
+    ]:
+        print(f"\n== Esfera 2: descoberta de interação -- {titulo} ==")
+        regras = extrair_candidatas(
+            X_dev,
+            y_dev,
+            profundidade_maxima=2,
+            n_arvores=60,
+            max_regras=5,
+            semente=0,
+            permitir_cruzamento_entre_bases=permitir_cruzamento,
+        )
+        if not regras:
+            print("Nenhuma regra sobreviveu aos filtros de suporte.")
+            continue
 
-    print("\n== Validação out-of-time (dev vs. teste) ==")
-    tabela = avaliar_estabilidade(regras, X_dev, y_dev, X_teste, y_teste)
-    with pd.option_context("display.width", 160, "display.max_colwidth", 60):
-        print(tabela.to_string(index=False))
+        tabela = avaliar_estabilidade(regras, X_dev, y_dev, X_teste, y_teste)
+        _imprimir_tabela(tabela)
 
-    print("\n== Ganho de AUC ao adicionar a melhor regra ==")
-    melhor = regras[0]
-    coluna_regra = melhor.aplicar(X_dev).astype(int)
-    coluna_regra_teste = melhor.aplicar(X_teste).astype(int)
-
-    modelo_base = LogisticRegression(max_iter=1000).fit(X_dev, y_dev)
-    auc_base = roc_auc_score(y_teste, modelo_base.predict_proba(X_teste)[:, 1])
-
-    X_dev_com_regra = X_dev.assign(_melhor_regra=coluna_regra)
-    X_teste_com_regra = X_teste.assign(_melhor_regra=coluna_regra_teste)
-    modelo_com_regra = LogisticRegression(max_iter=1000).fit(X_dev_com_regra, y_dev)
-    auc_com_regra = roc_auc_score(y_teste, modelo_com_regra.predict_proba(X_teste_com_regra)[:, 1])
-
-    print(f"Regra: {melhor.nome}")
-    print(f"AUC (teste) sem a regra: {auc_base:.4f}")
-    print(f"AUC (teste) com a regra: {auc_com_regra:.4f}")
+        melhor = regras[0]
+        auc_base, auc_com_regra = _auc_com_regra(melhor, X_dev, y_dev, X_teste, y_teste)
+        print(f"Melhor regra: {melhor.nome}")
+        print(f"AUC (teste) sem a regra: {auc_base:.4f}  |  com a regra: {auc_com_regra:.4f}")
 
 
 if __name__ == "__main__":

@@ -20,6 +20,8 @@ futuro pro ponto de observação).
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pandas as pd
 
@@ -51,6 +53,19 @@ def _slope(y: np.ndarray) -> float:
 
 #: Primitivas disponíveis — cada uma vira uma coluna `{valor}_{primitiva}_{n}m`.
 PRIMITIVAS_JANELA = ("maximo", "media", "minimo", "desvio_padrao", "tendencia")
+
+_SUFIXO_AGREGADO = re.compile(r"_(?:" + "|".join(PRIMITIVAS_JANELA) + r")_\d+m$")
+
+
+def extrair_base_agregado(nome_coluna: str) -> str:
+    """Reverte a convenção `{base}_{primitiva}_{janela}m` de
+    `construir_agregados_janela` pra recuperar a variável bruta de origem —
+    ex.: `dias_atraso_tendencia_3m` -> `dias_atraso`. Usado por
+    `interacao.extrair_candidatas` pra saber se uma regra está cruzando
+    variáveis brutas diferentes ou combinando primitivas da mesma. Colunas
+    que não seguem o padrão (não vieram desta função) voltam inalteradas.
+    """
+    return _SUFIXO_AGREGADO.sub("", nome_coluna)
 
 
 def construir_agregados_janela(
