@@ -394,7 +394,8 @@ export interface RespostaUploadPainel extends InfoPainel {
 }
 
 export interface ConfigAgregacao {
-  painel: string;
+  base: string;
+  tipo: "painel" | "flat";
   chave: string;
   coluna_tempo: string;
   colunas_valor: string[];
@@ -406,6 +407,12 @@ export interface ResultadoAgregacao {
   colunas_geradas: string[];
   n_linhas_painel: number;
   n_chaves: number;
+}
+
+export interface BaseBruta {
+  tabela: Record<string, unknown>[];
+  colunas: string[];
+  n_linhas: number;
 }
 
 export interface ParametrosEsfera2 {
@@ -467,6 +474,19 @@ export async function uploadPainel(arquivo: File, nome: string): Promise<Respost
   if (!resp.ok) {
     const corpo = await resp.json().catch(() => null);
     throw new Error(corpo?.detail ?? `Falha ao enviar painel (${resp.status})`);
+  }
+  return resp.json();
+}
+
+/** Carrega uma base sem passar pela esfera 1 — caminho pro toggle de
+ * agregação desligado, mesmo numa base tipo painel. */
+export async function carregarBaseBruta(base: string, tipo: "painel" | "flat"): Promise<BaseBruta> {
+  const resp = await fetch(
+    `${URL_API}/api/feature-lab/base-bruta?base=${encodeURIComponent(base)}&tipo=${tipo}`,
+  );
+  if (!resp.ok) {
+    const corpo = await resp.json().catch(() => null);
+    throw new Error(corpo?.detail ?? `Falha ao carregar base (${resp.status})`);
   }
   return resp.json();
 }

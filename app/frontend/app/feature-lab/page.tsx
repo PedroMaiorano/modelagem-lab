@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import {
   buscarInfoPainel,
   buscarPreviewDataset,
+  carregarBaseBruta,
   descobrirEmTabela,
   listarBasesFeatureLab,
   rodarAgregacao,
@@ -45,25 +46,30 @@ const CAMPOS_ORDENACAO: { campo: CampoOrdenacao; rotulo: string }[] = [
   { campo: "n_variaveis", rotulo: "nº variáveis" },
 ];
 
+//: heurística só pra sugerir default no seletor — usuário sempre pode trocar.
+const CANDIDATOS_TEMPO = new Set(["safra", "data", "mes", "tempo", "competencia", "anomes", "day"]);
+
 export default function FeatureLabPagina() {
   // --- etapa 1: base ---
   const [bases, setBases] = useState<BaseFeatureLab[]>([]);
   const [base, setBase] = useState<BaseFeatureLab | null>(null);
-
-  // --- etapa 2: esfera 1 (só aparece se base.tipo === "painel") ---
+  const [colunasBase, setColunasBase] = useState<string[]>([]);
   const [info, setInfo] = useState<InfoPainel | null>(null);
+  const [colunasFlatNumericas, setColunasFlatNumericas] = useState<string[]>([]);
+  const [arquivoUpload, setArquivoUpload] = useState<File | null>(null);
+  const [nomeUpload, setNomeUpload] = useState("");
+  const [enviando, setEnviando] = useState(false);
+
+  // --- etapa 2: esfera 1 (toggle -- usuário decide, não o tipo da base) ---
+  const [usarEsfera1, setUsarEsfera1] = useState(true);
   const [chave, setChave] = useState("");
   const [colunaTempo, setColunaTempo] = useState("");
   const [colunasValor, setColunasValor] = useState<Set<string>>(new Set());
   const [janelasTexto, setJanelasTexto] = useState("3");
-  const [arquivoUpload, setArquivoUpload] = useState<File | null>(null);
-  const [nomeUpload, setNomeUpload] = useState("");
-  const [enviando, setEnviando] = useState(false);
   const [rodandoEsfera1, setRodandoEsfera1] = useState(false);
   const [resultadoEsfera1, setResultadoEsfera1] = useState<ResultadoAgregacao | null>(null);
 
   // --- etapa 3: esfera 2 ---
-  const [colunasDisponiveisDireto, setColunasDisponiveisDireto] = useState<string[]>([]);
   const [colunasX, setColunasX] = useState<Set<string>>(new Set());
   const [profundidadeMaxima, setProfundidadeMaxima] = useState(2);
   const [nArvores, setNArvores] = useState(60);
@@ -99,9 +105,11 @@ export default function FeatureLabPagina() {
   if (base !== baseAnterior) {
     setBaseAnterior(base);
     setInfo(null);
+    setColunasBase([]);
+    setColunasFlatNumericas([]);
     setResultadoEsfera1(null);
     setResultado(null);
-    setColunasDisponiveisDireto([]);
+    setUsarEsfera1(base?.tipo === "painel");
   }
 
   useEffect(() => {
@@ -111,6 +119,7 @@ export default function FeatureLabPagina() {
       buscarInfoPainel(base.nome)
         .then((i) => {
           setInfo(i);
+          setColunasBase(i.colunas);
           setChave(i.chave_sugerida);
           setColunaTempo(i.tempo_sugerido);
           setColunasValor(new Set(i.colunas_valor_disponiveis));
@@ -119,8 +128,15 @@ export default function FeatureLabPagina() {
     } else {
       buscarPreviewDataset(base.nome)
         .then((p) => {
-          setColunasDisponiveisDireto(p.colunas_numericas);
+          setColunasBase(p.colunas);
+          setColunasFlatNumericas(p.colunas_numericas);
           setColunasX(new Set(p.colunas_numericas));
+          const chaveSugerida = p.colunas[0] ?? "";
+          const tempoSugerido =
+            p.colunas.find((c) => CANDIDATOS_TEMPO.has(c.toLowerCase())) ?? p.colunas[1] ?? "";
+          setChave(chaveSugerida);
+          setColunaTempo(tempoSugerido);
+          setColunasValor(new Set(p.colunas_numericas));
         })
         .catch((e) => setErro(String(e)));
     }
@@ -171,7 +187,8 @@ export default function FeatureLabPagina() {
     setResultado(null);
     try {
       const r = await rodarAgregacao({
-        painel: base.nome,
+        base: base.nome,
+        tipo: base.tipo,
         chave,
         coluna_tempo: colunaTempo,
         colunas_valor: [...colunasValor],
@@ -205,10 +222,16 @@ export default function FeatureLabPagina() {
       permitir_cruzamento_entre_bases: permitirCruzamento,
     };
     try {
-      const r =
-        base.tipo === "painel" && resultadoEsfera1
-          ? await descobrirEmTabela({ tabela: resultadoEsfera1.tabela, colunas_x: [...colunasX], ...parametros })
-          : await rodarDireto({ dataset: base.nome, colunas_x: [...colunasX], ...parametros });
+      let r: ResultadoFeatureLab;
+      if (usarEsfera1) {
+        if (!resultadoEsfera1) throw new Error("Rode a esfera 1 primeiro.");
+        r = await descobrirEmTabela({ tabela: resultadoEsfera1.tabela, colunas_x: [...colunasX], ...parametros });
+      } else if (base.tipo === "flat") {
+        r = await rodarDireto({ dataset: base.nome, colunas_x: [...colunasX], ...parametros });
+      } else {
+        const bruta = await carregarBaseBruta(base.nome, base.tipo);
+        r = await descobrirEmTabela({ tabela: bruta.tabela, colunas_x: [...colunasX], ...parametros });
+      }
       setResultado(r);
     } catch (e) {
       setErro(String(e));
@@ -225,9 +248,12 @@ export default function FeatureLabPagina() {
     }
   }
 
-  const precisaEsfera1 = base?.tipo === "painel";
-  const esfera2Liberada = precisaEsfera1 ? resultadoEsfera1 !== null : colunasDisponiveisDireto.length > 0;
-  const colunasParaEsfera2 = precisaEsfera1 ? (resultadoEsfera1?.colunas_geradas ?? []) : colunasDisponiveisDireto;
+  const esfera2Liberada = usarEsfera1 ? resultadoEsfera1 !== null : colunasBase.length > 0;
+  const colunasParaEsfera2 = usarEsfera1
+    ? (resultadoEsfera1?.colunas_geradas ?? [])
+    : base?.tipo === "flat"
+      ? colunasFlatNumericas
+      : colunasBase.filter((c) => c !== chave && c !== colunaTempo);
 
   const regrasFiltradas: RegraFeatureLab[] = (resultado?.regras ?? [])
     .filter((r) => r.iv_teste >= ivMinimo)
@@ -244,7 +270,7 @@ export default function FeatureLabPagina() {
         <div>
           <h1 className="text-lg font-semibold text-slate-100">Feature-lab</h1>
           <p className="text-sm text-slate-500">
-            Base → agregação (esfera 1, se aplicável) → descoberta de interação (esfera 2).
+            Base → agregação (esfera 1, opcional) → descoberta de interação (esfera 2).
           </p>
         </div>
         <Link href="/" className="text-xs text-slate-500 hover:text-emerald-400">
@@ -274,13 +300,7 @@ export default function FeatureLabPagina() {
           </div>
           {info && (
             <p className="text-xs text-slate-500">
-              {info.n_linhas.toLocaleString("pt-BR")} linhas, {info.n_chaves.toLocaleString("pt-BR")} chaves —
-              tem granularidade de painel, a esfera 1 abaixo é aplicável.
-            </p>
-          )}
-          {base?.tipo === "flat" && (
-            <p className="text-xs text-slate-500">
-              Base já flat — sem granularidade de painel, pula direto pra esfera 2.
+              {info.n_linhas.toLocaleString("pt-BR")} linhas, {info.n_chaves.toLocaleString("pt-BR")} chaves
             </p>
           )}
         </div>
@@ -315,29 +335,74 @@ export default function FeatureLabPagina() {
         </div>
       </Secao>
 
-      {/* Etapa 2: esfera 1 (só se painel) --------------------------------- */}
-      {precisaEsfera1 && info && (
+      {/* Toggle da esfera 1 -- decisão do usuário, não travada pelo tipo --- */}
+      {base && colunasBase.length > 0 && (
+        <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={usarEsfera1}
+            onChange={(e) => setUsarEsfera1(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+          />
+          Usar esfera 1 (agregação por chave + tempo)
+        </label>
+      )}
+
+      {/* Etapa 2: esfera 1 ------------------------------------------------ */}
+      {usarEsfera1 && base && colunasBase.length > 0 && (
         <Secao titulo="2. Esfera 1 — agregação temporal">
           <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap gap-4">
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-500">chave</label>
+                <select
+                  value={chave}
+                  onChange={(e) => setChave(e.target.value)}
+                  className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                >
+                  {colunasBase.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-500">coluna de tempo/safra</label>
+                <select
+                  value={colunaTempo}
+                  onChange={(e) => setColunaTempo(e.target.value)}
+                  className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                >
+                  {colunasBase.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
             <div>
               <p className="mb-1.5 text-[11px] text-slate-500">
                 colunas brutas a agregar (máximo/média/mínimo/desvio/tendência por janela)
               </p>
               <div className="flex flex-wrap gap-2">
-                {info.colunas_valor_disponiveis.map((c) => (
-                  <label
-                    key={c}
-                    className="flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={colunasValor.has(c)}
-                      onChange={() => alternar(colunasValor, c, setColunasValor)}
-                      className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
-                    />
-                    {c}
-                  </label>
-                ))}
+                {colunasBase
+                  .filter((c) => c !== chave && c !== colunaTempo && c !== "y")
+                  .map((c) => (
+                    <label
+                      key={c}
+                      className="flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={colunasValor.has(c)}
+                        onChange={() => alternar(colunasValor, c, setColunasValor)}
+                        className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+                      />
+                      {c}
+                    </label>
+                  ))}
               </div>
             </div>
             <div>
@@ -374,7 +439,7 @@ export default function FeatureLabPagina() {
 
       {/* Etapa 3: esfera 2 -------------------------------------------------- */}
       {esfera2Liberada && (
-        <Secao titulo={`${precisaEsfera1 ? "3" : "2"}. Esfera 2 — descoberta de interação`}>
+        <Secao titulo={`${usarEsfera1 ? "3" : "2"}. Esfera 2 — descoberta de interação`}>
           <div className="mb-4">
             <p className="mb-1.5 text-[11px] text-slate-500">colunas candidatas</p>
             <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">

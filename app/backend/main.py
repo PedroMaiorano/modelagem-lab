@@ -20,6 +20,7 @@ import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from feature_lab import (
+    carregar_base_bruta,
     descobrir_em_tabela,
     info_painel,
     listar_bases,
@@ -404,6 +405,16 @@ def rota_info_painel(nome: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
+@app.get("/api/feature-lab/base-bruta")
+def rota_carregar_base_bruta(base: str, tipo: Literal["painel", "flat"]) -> dict[str, Any]:
+    """Carrega a base sem passar pela esfera 1 -- pro toggle de agregação
+    desligado, mesmo numa base tipo painel."""
+    try:
+        return carregar_base_bruta(base, tipo)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @app.post("/api/feature-lab/paineis/upload")
 async def rota_upload_painel(
     arquivo: Annotated[UploadFile, File()], nome: Annotated[str, Form()]
@@ -420,7 +431,8 @@ async def rota_upload_painel(
 
 
 class ConfigAgregacao(BaseModel):
-    painel: str
+    base: str
+    tipo: Literal["painel", "flat"]
     chave: str
     coluna_tempo: str
     colunas_valor: list[str]
@@ -433,7 +445,8 @@ def rota_rodar_agregacao(config: ConfigAgregacao) -> dict[str, Any]:
     e mandar de volta em /descobrir (etapa separada, clique separado)."""
     try:
         return rodar_agregacao(
-            painel=config.painel,
+            base=config.base,
+            tipo=config.tipo,
             chave=config.chave,
             coluna_tempo=config.coluna_tempo,
             colunas_valor=config.colunas_valor,

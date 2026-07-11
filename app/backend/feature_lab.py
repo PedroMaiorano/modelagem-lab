@@ -6,16 +6,18 @@ nunca reimplementa lógica de modelagem, ver `logica.py`).
 
 Fluxo único e sequencial (não dois "modos" separados — feedback real: dois
 formulários quase idênticos era confuso). `listar_bases` devolve TODA base
-disponível (painel ou já-flat) com o tipo marcado; a interface decide na
-hora se mostra a etapa de esfera 1 ou pula direto pra esfera 2, a partir do
-tipo escolhido:
+disponível (painel ou já-flat) com o tipo marcado, mas o tipo é só uma
+SUGESTÃO de default pra interface — a decisão de rodar esfera 1 ou não é do
+usuário (toggle explícito), não uma trava automática: `agregar_base` aceita
+qualquer base (painel OU flat) contanto que o usuário escolha colunas de
+chave/tempo válidas nela.
 
-- **painel** (`data/{nome}/painel.csv`, uma linha por chave-tempo): passa
-  pela esfera 1 (`agregar_painel`) antes da esfera 2 (`descobrir_em_tabela`,
-  que recebe o resultado da esfera 1 como registros).
+- **painel** (`data/{nome}/painel.csv`, uma linha por chave-tempo): o caso
+  natural pra esfera 1 -- já tem colunas de chave/tempo sugeridas.
 - **flat** (mesmos `dev.csv`/`teste.csv` que o Pedro_Wise usa, via
-  `logica.carregar_dataset`): esfera 1 nem aparece — vai direto pra esfera 2
-  (`rodar_direto`) com as colunas escolhidas como candidatas.
+  `logica.carregar_dataset`): normalmente pula esfera 1 (`rodar_direto`),
+  mas nada impede o usuário de escolher chave/tempo manualmente ali também
+  se fizer sentido pro caso dele.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 _RAIZ = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_RAIZ / "python"))
@@ -103,8 +105,49 @@ def salvar_painel(nome: str, conteudo: pd.DataFrame) -> dict[str, Any]:
     return info_painel(nome_seguro) | {"nome": nome_seguro}
 
 
-def agregar_painel(
-    painel: str,
+def _carregar_tabela_base(base: str, tipo: Literal["painel", "flat"]) -> tuple[pd.DataFrame, Path | None]:
+    """Carrega a tabela bruta de uma base, seja painel (`painel.csv`) ou
+    flat (`dev.csv`+`teste.csv` concatenados, via `logica.carregar_dataset`).
+    Devolve também o caminho de `agregado.csv` (só faz sentido pra painel,
+    onde o alvo pode morar num arquivo à parte) -- `None` pra flat, que já
+    carrega `y` junto."""
+    if tipo == "painel":
+        pasta = DIR_PAINEIS / base
+        caminho_painel = pasta / "painel.csv"
+        if not caminho_painel.exists():
+            raise ValueError(f"Painel '{base}' não encontrado")
+        return pd.read_csv(caminho_painel), pasta / "agregado.csv"
+
+    from logica import carregar_dataset  # import tardio evita ciclo com main.py
+
+    df_dev, df_teste = carregar_dataset(base)
+    return pd.concat([df_dev, df_teste], ignore_index=True), None
+
+
+def carregar_base_bruta(base: str, tipo: Literal["painel", "flat"]) -> dict[str, Any]:
+    """Carrega a base sem passar pela esfera 1 -- caminho pro toggle de
+    agregação desligado mesmo numa base tipo painel (cada usuário decide,
+    não é travado pelo tipo). Devolve como registros, no mesmo formato que
+    `descobrir_em_tabela` espera.
+
+    Base painel sem coluna `y` própria (comum -- o alvo geralmente vive só
+    no ponto de observação agregado, não em cada linha do histórico bruto)
+    levanta erro claro em vez de silenciosamente não achar o alvo: sem
+    rodar a esfera 1 primeiro, não tem como saber qual linha do histórico
+    de cada chave é "a" observação a associar ao `y`.
+    """
+    df, caminho_alvo = _carregar_tabela_base(base, tipo)
+    if "y" not in df.columns:
+        raise ValueError(
+            f"Base '{base}' não tem coluna 'y' nas linhas brutas -- rode a esfera 1 primeiro "
+            "(o alvo normalmente só existe no ponto de observação agregado, não no histórico bruto)"
+        )
+    return {"tabela": df.to_dict(orient="records"), "colunas": list(df.columns), "n_linhas": len(df)}
+
+
+def agregar_base(
+    base: str,
+    tipo: Literal["painel", "flat"],
     chave: str,
     coluna_tempo: str,
     colunas_valor: list[str],
@@ -112,19 +155,26 @@ def agregar_painel(
 ) -> dict[str, Any]:
     """Esfera 1: roda `construir_agregados_janela` pra cada `colunas_valor` e
     reduz a uma linha por chave (último período). Devolve a tabela pronta
-    (com `y`, se disponível em `agregado.csv`), a lista de colunas geradas,
-    e as contagens brutas do painel (pra resumo na interface).
+    (com `y`), a lista de colunas geradas, e as contagens brutas (pra resumo
+    na interface). Funciona em cima de painel OU dataset flat -- a escolha
+    de chave/tempo é do usuário, não uma trava por tipo de base.
     """
-    pasta = DIR_PAINEIS / painel
-    caminho_painel = pasta / "painel.csv"
-    caminho_alvo = pasta / "agregado.csv"
-    if not caminho_painel.exists():
-        raise ValueError(f"Painel '{painel}' não encontrado")
     if not colunas_valor:
         raise ValueError("Selecione ao menos uma coluna de valor pra agregar")
 
-    df = pd.read_csv(caminho_painel)
-    df["_tempo_norm"] = normalizar_safra(df[coluna_tempo])
+    df, caminho_alvo = _carregar_tabela_base(base, tipo)
+    if chave not in df.columns or coluna_tempo not in df.columns:
+        raise ValueError(f"Colunas de chave/tempo inválidas pra '{base}'")
+
+    # normalizar_safra espera formato de data/safra (a razão de existir é
+    # unificar "202401"/"2024-01"/"2024-01-15" misturados) -- forçar isso
+    # numa coluna de tempo já numérica (comum quando a "esfera 1" é aplicada
+    # numa base flat qualquer, não um painel de verdade com safra) rejeitava
+    # a coluna sem necessidade. Só normaliza quando não é numérica.
+    if pd.api.types.is_numeric_dtype(df[coluna_tempo]):
+        df["_tempo_norm"] = df[coluna_tempo]
+    else:
+        df["_tempo_norm"] = normalizar_safra(df[coluna_tempo])
     df = df.sort_values([chave, "_tempo_norm"]).reset_index(drop=True)
 
     agregado = df
@@ -138,8 +188,8 @@ def agregar_painel(
     por_chave = agregado.groupby(chave, sort=False).tail(1).reset_index(drop=True)
 
     if "y" not in por_chave.columns:
-        if not caminho_alvo.exists():
-            raise ValueError(f"Painel '{painel}' não tem coluna 'y' nem agregado.csv com o alvo")
+        if caminho_alvo is None or not caminho_alvo.exists():
+            raise ValueError(f"Base '{base}' não tem coluna 'y' nem agregado.csv com o alvo")
         alvo = pd.read_csv(caminho_alvo)[[chave, "y"]]
         por_chave = por_chave.merge(alvo, on=chave, how="inner")
 
@@ -221,7 +271,8 @@ def _descobrir(
 
 
 def rodar_agregacao(
-    painel: str,
+    base: str,
+    tipo: Literal["painel", "flat"],
     chave: str,
     coluna_tempo: str,
     colunas_valor: list[str],
@@ -229,10 +280,10 @@ def rodar_agregacao(
 ) -> dict[str, Any]:
     """Esfera 1 sozinha, empacotada pra API -- devolve a tabela resultante
     como registros (JSON-serializável) pra interface guardar e mandar de
-    volta na chamada da esfera 2 (`descobrir_em_tabela`), sem precisar ler o
-    painel do disco de novo nem introduzir estado no backend entre as duas
+    volta na chamada da esfera 2 (`descobrir_em_tabela`), sem precisar ler a
+    base do disco de novo nem introduzir estado no backend entre as duas
     chamadas."""
-    agregacao = agregar_painel(painel, chave, coluna_tempo, colunas_valor, janelas)
+    agregacao = agregar_base(base, tipo, chave, coluna_tempo, colunas_valor, janelas)
     return {
         "tabela": agregacao["tabela"].to_dict(orient="records"),
         "colunas_geradas": agregacao["colunas_geradas"],
