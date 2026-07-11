@@ -109,10 +109,16 @@ def extrair_candidatas(
     - só caminhos com 2+ condições (interação de verdade, não univariado);
     - se `permitir_cruzamento_entre_bases=False`, descarta caminhos cujas
       condições vêm de mais de uma base;
-    - deduplicação (a mesma regra pode aparecer em várias árvores);
+    - deduplicação exata (a mesma regra, mesmo limiar, pode aparecer em
+      várias árvores);
     - suporte entre `min_suporte` e `max_suporte` (fração de linhas que
       satisfaz a regra) — descarta regras triviais (quase sempre ou quase
       nunca verdadeiras, pouco informativas ou superajustadas a poucos casos);
+    - quase-duplicatas: a mesma combinação de variáveis+direção (ex.:
+      `cloud<=61.5` e `cloud<=64.5`) reaparece com limiar ligeiramente
+      diferente em árvores treinadas em subamostras diferentes — mantém só a
+      de maior IV por "assinatura" (variáveis+operadores, ignorando o
+      limiar), senão a tabela final fica cheia de linhas quase idênticas;
     - ranking por IV (via `transformacao.woe.ajustar_woe`, tratando a regra
       como variável binária), truncado em `max_regras`.
     """
@@ -151,8 +157,15 @@ def extrair_candidatas(
         iv = ajustar_woe(mascara.astype(str), y).iv_total
         avaliadas.append((iv, regra))
 
-    avaliadas.sort(key=lambda par: par[0], reverse=True)
-    return [regra for _, regra in avaliadas[:max_regras]]
+    melhor_por_assinatura: dict[frozenset[tuple[str, Operador]], tuple[float, Regra]] = {}
+    for iv, regra in avaliadas:
+        assinatura = frozenset((c.feature, c.operador) for c in regra.condicoes)
+        atual = melhor_por_assinatura.get(assinatura)
+        if atual is None or iv > atual[0]:
+            melhor_por_assinatura[assinatura] = (iv, regra)
+
+    avaliadas_unicas = sorted(melhor_por_assinatura.values(), key=lambda par: par[0], reverse=True)
+    return [regra for _, regra in avaliadas_unicas[:max_regras]]
 
 
 def regras_para_colunas(regras: list[Regra], df: pd.DataFrame, sufixo: str = "_regra") -> pd.DataFrame:

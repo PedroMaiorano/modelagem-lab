@@ -132,3 +132,17 @@ def test_restringir_a_mesma_base_bloqueia_regra_cruzada():
     for regra in regras:
         bases = {extrair_base_agregado(c.feature) for c in regra.condicoes}
         assert len(bases) == 1  # nenhuma regra devolvida mistura atraso com renda
+
+
+def test_nao_devolve_quase_duplicatas_de_limiar():
+    """Bug real observado: a mesma combinação de variáveis+direção reaparece
+    com limiar levemente diferente em árvores treinadas em subamostras
+    diferentes (ex.: "cloud<=61.5 & X" e "cloud<=64.5 & X") -- a tabela final
+    não deve ter duas regras com a mesma "assinatura" (mesmas variáveis e
+    mesmos operadores, só o número do limiar mudando).
+    """
+    X, y = _dataset_interacao_xor(n=4000)
+    regras = extrair_candidatas(X, y, profundidade_maxima=2, n_arvores=80, max_regras=30, semente=0)
+
+    assinaturas = [frozenset((c.feature, c.operador) for c in r.condicoes) for r in regras]
+    assert len(assinaturas) == len(set(assinaturas))
