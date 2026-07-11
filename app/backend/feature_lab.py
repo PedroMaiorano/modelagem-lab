@@ -4,15 +4,18 @@ Este módulo só orquestra: lê dado de disco, chama o core, empacota resultado
 pra API — mesma regra do resto do backend (núcleo em `python/`, backend
 nunca reimplementa lógica de modelagem, ver `logica.py`).
 
-Duas fontes de dado, desacopladas de propósito (feedback real: nem todo
-dataset tem granularidade de painel mensal, e forçar por esfera 1 pra
-chegar na esfera 2 não faz sentido nesse caso):
+Fluxo único e sequencial (não dois "modos" separados — feedback real: dois
+formulários quase idênticos era confuso). `listar_bases` devolve TODA base
+disponível (painel ou já-flat) com o tipo marcado; a interface decide na
+hora se mostra a etapa de esfera 1 ou pula direto pra esfera 2, a partir do
+tipo escolhido:
 
-- **Painel** (`data/{nome}/painel.csv`, uma linha por chave-tempo): passa
-  pela esfera 1 (`agregar_painel`) antes da esfera 2.
-- **Direto** (qualquer dataset já flat, os mesmos `dev.csv`/`teste.csv` que
-  o Pedro_Wise usa, via `logica.carregar_dataset`): pula a esfera 1, vai
-  direto pra esfera 2 com as colunas escolhidas como candidatas.
+- **painel** (`data/{nome}/painel.csv`, uma linha por chave-tempo): passa
+  pela esfera 1 (`agregar_painel`) antes da esfera 2 (`descobrir_em_tabela`,
+  que recebe o resultado da esfera 1 como registros).
+- **flat** (mesmos `dev.csv`/`teste.csv` que o Pedro_Wise usa, via
+  `logica.carregar_dataset`): esfera 1 nem aparece — vai direto pra esfera 2
+  (`rodar_direto`) com as colunas escolhidas como candidatas.
 """
 
 from __future__ import annotations
@@ -41,10 +44,23 @@ _CANDIDATOS_TEMPO = {"safra", "data", "mes", "tempo", "competencia", "anomes"}
 
 
 def listar_paineis() -> list[str]:
-    """Pastas em `data/` que têm `painel.csv` -- candidatas ao modo agregação."""
+    """Pastas em `data/` que têm `painel.csv` -- candidatas à esfera 1."""
     if not DIR_PAINEIS.exists():
         return []
     return sorted(p.name for p in DIR_PAINEIS.iterdir() if p.is_dir() and (p / "painel.csv").exists())
+
+
+def listar_bases() -> list[dict[str, str]]:
+    """Toda base disponível pro Feature-lab, com o tipo marcado -- um seletor
+    só, em vez de dois formulários separados pra "painel" e "dataset flat".
+    Painel tem prioridade se a mesma pasta tiver os dois formatos (não
+    deveria acontecer na prática, mas evita ambiguidade)."""
+    from logica import listar_datasets  # import tardio evita ciclo com main.py
+
+    paineis = set(listar_paineis())
+    bases = [{"nome": n, "tipo": "painel"} for n in sorted(paineis)]
+    bases += [{"nome": n, "tipo": "flat"} for n in listar_datasets() if n not in paineis]
+    return bases
 
 
 def info_painel(nome: str) -> dict[str, Any]:
@@ -210,6 +226,24 @@ def rodar_agregacao(
     coluna_tempo: str,
     colunas_valor: list[str],
     janelas: list[int],
+) -> dict[str, Any]:
+    """Esfera 1 sozinha, empacotada pra API -- devolve a tabela resultante
+    como registros (JSON-serializável) pra interface guardar e mandar de
+    volta na chamada da esfera 2 (`descobrir_em_tabela`), sem precisar ler o
+    painel do disco de novo nem introduzir estado no backend entre as duas
+    chamadas."""
+    agregacao = agregar_painel(painel, chave, coluna_tempo, colunas_valor, janelas)
+    return {
+        "tabela": agregacao["tabela"].to_dict(orient="records"),
+        "colunas_geradas": agregacao["colunas_geradas"],
+        "n_linhas_painel": agregacao["n_linhas_painel"],
+        "n_chaves": agregacao["n_chaves"],
+    }
+
+
+def descobrir_em_tabela(
+    registros: list[dict[str, Any]],
+    colunas_x: list[str],
     profundidade_maxima: int = 2,
     n_arvores: int = 60,
     min_suporte: float = 0.02,
@@ -218,19 +252,23 @@ def rodar_agregacao(
     permitir_cruzamento_entre_bases: bool = True,
     semente: int = 0,
 ) -> dict[str, Any]:
-    """Modo com agregação: esfera 1 (painel -> uma linha por chave) seguida
-    da esfera 2 sobre o resultado."""
-    agregacao = agregar_painel(painel, chave, coluna_tempo, colunas_valor, janelas)
-    por_chave, colunas_geradas = agregacao["tabela"], agregacao["colunas_geradas"]
+    """Esfera 2 sobre uma tabela já em mãos (tipicamente a saída de
+    `rodar_agregacao`) -- reconstrói o DataFrame, faz o split dev/teste
+    (aleatório, seedado) e roda `_descobrir`."""
+    if not colunas_x:
+        raise ValueError("Selecione ao menos uma coluna candidata")
+    if "y" not in (registros[0] if registros else {}):
+        raise ValueError("Tabela sem coluna 'y'")
 
-    rng_split = por_chave.sample(frac=1, random_state=semente)
+    df = pd.DataFrame.from_records(registros)
+    rng_split = df.sample(frac=1, random_state=semente)
     metade = len(rng_split) // 2
     dev, teste = rng_split.iloc[:metade], rng_split.iloc[metade:]
 
-    resultado = _descobrir(
-        dev[colunas_geradas],
+    return _descobrir(
+        dev[colunas_x],
         dev["y"],
-        teste[colunas_geradas],
+        teste[colunas_x],
         teste["y"],
         profundidade_maxima,
         n_arvores,
@@ -240,9 +278,6 @@ def rodar_agregacao(
         permitir_cruzamento_entre_bases,
         semente,
     )
-    resultado["n_linhas_painel"] = agregacao["n_linhas_painel"]
-    resultado["n_chaves"] = agregacao["n_chaves"]
-    return resultado
 
 
 def rodar_direto(

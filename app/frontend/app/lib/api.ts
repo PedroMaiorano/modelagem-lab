@@ -375,6 +375,11 @@ export async function rodarPipelineComProgresso(
 // Feature-lab (esferas 1/2, experimental). Ver app/backend/feature_lab.py.
 // ---------------------------------------------------------------------------
 
+export interface BaseFeatureLab {
+  nome: string;
+  tipo: "painel" | "flat";
+}
+
 export interface InfoPainel {
   colunas: string[];
   chave_sugerida: string;
@@ -384,12 +389,26 @@ export interface InfoPainel {
   n_chaves: number;
 }
 
+export interface RespostaUploadPainel extends InfoPainel {
+  nome: string;
+}
+
 export interface ConfigAgregacao {
   painel: string;
   chave: string;
   coluna_tempo: string;
   colunas_valor: string[];
   janelas: number[];
+}
+
+export interface ResultadoAgregacao {
+  tabela: Record<string, unknown>[];
+  colunas_geradas: string[];
+  n_linhas_painel: number;
+  n_chaves: number;
+}
+
+export interface ParametrosEsfera2 {
   profundidade_maxima: number;
   n_arvores: number;
   min_suporte: number;
@@ -398,15 +417,14 @@ export interface ConfigAgregacao {
   permitir_cruzamento_entre_bases: boolean;
 }
 
-export interface ConfigDireto {
+export interface ConfigDescobrir extends ParametrosEsfera2 {
+  tabela: Record<string, unknown>[];
+  colunas_x: string[];
+}
+
+export interface ConfigDireto extends ParametrosEsfera2 {
   dataset: string;
   colunas_x: string[];
-  profundidade_maxima: number;
-  n_arvores: number;
-  min_suporte: number;
-  max_suporte: number;
-  max_regras: number;
-  permitir_cruzamento_entre_bases: boolean;
 }
 
 export interface RegraFeatureLab {
@@ -420,8 +438,6 @@ export interface RegraFeatureLab {
 }
 
 export interface ResultadoFeatureLab {
-  n_linhas_painel?: number;
-  n_chaves?: number;
   colunas_x: string[];
   n_dev: number;
   n_teste: number;
@@ -431,13 +447,9 @@ export interface ResultadoFeatureLab {
   tempo_execucao_segundos: number;
 }
 
-export interface RespostaUploadPainel extends InfoPainel {
-  nome: string;
-}
-
-export async function listarPaineis(): Promise<string[]> {
-  const resp = await fetch(`${URL_API}/api/feature-lab/paineis`);
-  if (!resp.ok) throw new Error(`Falha ao listar painéis (${resp.status})`);
+export async function listarBasesFeatureLab(): Promise<BaseFeatureLab[]> {
+  const resp = await fetch(`${URL_API}/api/feature-lab/bases`);
+  if (!resp.ok) throw new Error(`Falha ao listar bases (${resp.status})`);
   return resp.json();
 }
 
@@ -459,7 +471,9 @@ export async function uploadPainel(arquivo: File, nome: string): Promise<Respost
   return resp.json();
 }
 
-export async function rodarAgregacao(config: ConfigAgregacao): Promise<ResultadoFeatureLab> {
+/** Esfera 1 sozinha — devolve a tabela agregada, que a interface guarda e
+ * manda de volta em `descobrirEmTabela` (etapa separada, clique separado). */
+export async function rodarAgregacao(config: ConfigAgregacao): Promise<ResultadoAgregacao> {
   const resp = await fetch(`${URL_API}/api/feature-lab/agregacao`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -472,6 +486,21 @@ export async function rodarAgregacao(config: ConfigAgregacao): Promise<Resultado
   return resp.json();
 }
 
+/** Esfera 2 sobre a tabela que a esfera 1 já produziu. */
+export async function descobrirEmTabela(config: ConfigDescobrir): Promise<ResultadoFeatureLab> {
+  const resp = await fetch(`${URL_API}/api/feature-lab/descobrir`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!resp.ok) {
+    const corpo = await resp.json().catch(() => null);
+    throw new Error(corpo?.detail ?? `Falha ao rodar descoberta (${resp.status})`);
+  }
+  return resp.json();
+}
+
+/** Esfera 2 direto sobre um dataset já flat (pula a esfera 1 inteira). */
 export async function rodarDireto(config: ConfigDireto): Promise<ResultadoFeatureLab> {
   const resp = await fetch(`${URL_API}/api/feature-lab/direto`, {
     method: "POST",

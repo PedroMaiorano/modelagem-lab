@@ -19,7 +19,15 @@ from typing import Annotated, Any, Literal
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from feature_lab import info_painel, listar_paineis, rodar_agregacao, rodar_direto, salvar_painel
+from feature_lab import (
+    descobrir_em_tabela,
+    info_painel,
+    listar_bases,
+    listar_paineis,
+    rodar_agregacao,
+    rodar_direto,
+    salvar_painel,
+)
 from ingestao import (
     calcular_corte_por_percentual,
     carregar_staging,
@@ -376,6 +384,13 @@ async def rota_rodar_pipeline(config: ConfigPipeline) -> EventSourceResponse:
 # ---------------------------------------------------------------------------
 
 
+@app.get("/api/feature-lab/bases")
+def rota_listar_bases() -> list[dict[str, str]]:
+    """Toda base disponível (painel ou já-flat), com o tipo marcado -- um
+    seletor só na interface, que decide na hora se mostra a esfera 1."""
+    return listar_bases()
+
+
 @app.get("/api/feature-lab/paineis")
 def rota_listar_paineis() -> list[str]:
     return listar_paineis()
@@ -410,6 +425,27 @@ class ConfigAgregacao(BaseModel):
     coluna_tempo: str
     colunas_valor: list[str]
     janelas: list[int] = [3]
+
+
+@app.post("/api/feature-lab/agregacao")
+def rota_rodar_agregacao(config: ConfigAgregacao) -> dict[str, Any]:
+    """Esfera 1 sozinha -- devolve a tabela resultante pra interface guardar
+    e mandar de volta em /descobrir (etapa separada, clique separado)."""
+    try:
+        return rodar_agregacao(
+            painel=config.painel,
+            chave=config.chave,
+            coluna_tempo=config.coluna_tempo,
+            colunas_valor=config.colunas_valor,
+            janelas=config.janelas,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+class ConfigDescobrir(BaseModel):
+    tabela: list[dict[str, Any]]
+    colunas_x: list[str]
     profundidade_maxima: int = 2
     n_arvores: int = 60
     min_suporte: float = 0.02
@@ -418,15 +454,14 @@ class ConfigAgregacao(BaseModel):
     permitir_cruzamento_entre_bases: bool = True
 
 
-@app.post("/api/feature-lab/agregacao")
-def rota_rodar_agregacao(config: ConfigAgregacao) -> dict[str, Any]:
+@app.post("/api/feature-lab/descobrir")
+def rota_descobrir_em_tabela(config: ConfigDescobrir) -> dict[str, Any]:
+    """Esfera 2 sozinha, sobre a tabela que a esfera 1 já produziu (etapa
+    separada da agregação -- clique separado na interface)."""
     try:
-        return rodar_agregacao(
-            painel=config.painel,
-            chave=config.chave,
-            coluna_tempo=config.coluna_tempo,
-            colunas_valor=config.colunas_valor,
-            janelas=config.janelas,
+        return descobrir_em_tabela(
+            registros=config.tabela,
+            colunas_x=config.colunas_x,
             profundidade_maxima=config.profundidade_maxima,
             n_arvores=config.n_arvores,
             min_suporte=config.min_suporte,

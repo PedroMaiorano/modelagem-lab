@@ -3,15 +3,17 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
-  buscarDatasets,
   buscarInfoPainel,
   buscarPreviewDataset,
-  listarPaineis,
+  descobrirEmTabela,
+  listarBasesFeatureLab,
   rodarAgregacao,
   rodarDireto,
   uploadPainel,
+  type BaseFeatureLab,
   type InfoPainel,
   type RegraFeatureLab,
+  type ResultadoAgregacao,
   type ResultadoFeatureLab,
 } from "../lib/api";
 
@@ -33,7 +35,6 @@ function Metrica({ rotulo, valor }: { rotulo: string; valor: string }) {
   );
 }
 
-type Modo = "agregacao" | "direto";
 type CampoOrdenacao = "iv_teste" | "iv_dev" | "suporte_teste" | "n_condicoes" | "n_variaveis";
 
 const CAMPOS_ORDENACAO: { campo: CampoOrdenacao; rotulo: string }[] = [
@@ -45,11 +46,11 @@ const CAMPOS_ORDENACAO: { campo: CampoOrdenacao; rotulo: string }[] = [
 ];
 
 export default function FeatureLabPagina() {
-  const [modo, setModo] = useState<Modo>("agregacao");
+  // --- etapa 1: base ---
+  const [bases, setBases] = useState<BaseFeatureLab[]>([]);
+  const [base, setBase] = useState<BaseFeatureLab | null>(null);
 
-  // --- modo agregação ---
-  const [paineis, setPaineis] = useState<string[]>([]);
-  const [painel, setPainel] = useState("");
+  // --- etapa 2: esfera 1 (só aparece se base.tipo === "painel") ---
   const [info, setInfo] = useState<InfoPainel | null>(null);
   const [chave, setChave] = useState("");
   const [colunaTempo, setColunaTempo] = useState("");
@@ -58,69 +59,72 @@ export default function FeatureLabPagina() {
   const [arquivoUpload, setArquivoUpload] = useState<File | null>(null);
   const [nomeUpload, setNomeUpload] = useState("");
   const [enviando, setEnviando] = useState(false);
+  const [rodandoEsfera1, setRodandoEsfera1] = useState(false);
+  const [resultadoEsfera1, setResultadoEsfera1] = useState<ResultadoAgregacao | null>(null);
 
-  // --- modo direto ---
-  const [datasets, setDatasets] = useState<string[]>([]);
-  const [dataset, setDataset] = useState("");
-  const [colunasDisponiveis, setColunasDisponiveis] = useState<string[]>([]);
+  // --- etapa 3: esfera 2 ---
+  const [colunasDisponiveisDireto, setColunasDisponiveisDireto] = useState<string[]>([]);
   const [colunasX, setColunasX] = useState<Set<string>>(new Set());
-
-  // --- esfera 2 (comum aos dois modos) ---
   const [profundidadeMaxima, setProfundidadeMaxima] = useState(2);
   const [nArvores, setNArvores] = useState(60);
   const [minSuporte, setMinSuporte] = useState(0.02);
   const [maxSuporte, setMaxSuporte] = useState(0.5);
   const [maxRegras, setMaxRegras] = useState(20);
   const [permitirCruzamento, setPermitirCruzamento] = useState(true);
-
-  const [rodando, setRodando] = useState(false);
-  const [erro, setErro] = useState<string | null>(null);
+  const [rodandoEsfera2, setRodandoEsfera2] = useState(false);
   const [resultado, setResultado] = useState<ResultadoFeatureLab | null>(null);
 
-  // --- tabela: ordenação/filtro ---
+  const [erro, setErro] = useState<string | null>(null);
+
+  // --- tabela final: ordenação/filtro ---
   const [ordenarPor, setOrdenarPor] = useState<CampoOrdenacao>("iv_teste");
   const [ordemAsc, setOrdemAsc] = useState(false);
   const [ivMinimo, setIvMinimo] = useState(0);
   const [nVariaveisFiltro, setNVariaveisFiltro] = useState<"todas" | "1" | "2+">("todas");
 
   useEffect(() => {
-    listarPaineis()
+    listarBasesFeatureLab()
       .then((lista) => {
-        setPaineis(lista);
-        if (lista.length > 0) setPainel(lista[0]);
-      })
-      .catch((e) => setErro(String(e)));
-    buscarDatasets()
-      .then((lista) => {
-        setDatasets(lista);
-        if (lista.length > 0) setDataset(lista[0]);
+        setBases(lista);
+        if (lista.length > 0) setBase(lista[0]);
       })
       .catch((e) => setErro(String(e)));
   }, []);
 
-  useEffect(() => {
-    if (!painel || modo !== "agregacao") return;
-    buscarInfoPainel(painel)
-      .then((i) => {
-        setInfo(i);
-        setChave(i.chave_sugerida);
-        setColunaTempo(i.tempo_sugerido);
-        setColunasValor(new Set(i.colunas_valor_disponiveis));
-        setResultado(null);
-      })
-      .catch((e) => setErro(String(e)));
-  }, [painel, modo]);
+  // Troca de base: reseta tudo que veio de uma base anterior. Ajuste de
+  // estado durante o render (padrão documentado pelo React pra "resetar
+  // estado quando uma prop muda") em vez de useEffect -- evita a cascata
+  // de re-renders de chamar setState direto no corpo de um efeito.
+  const [baseAnterior, setBaseAnterior] = useState<BaseFeatureLab | null>(null);
+  if (base !== baseAnterior) {
+    setBaseAnterior(base);
+    setInfo(null);
+    setResultadoEsfera1(null);
+    setResultado(null);
+    setColunasDisponiveisDireto([]);
+  }
 
   useEffect(() => {
-    if (!dataset || modo !== "direto") return;
-    buscarPreviewDataset(dataset)
-      .then((p) => {
-        setColunasDisponiveis(p.colunas_numericas);
-        setColunasX(new Set(p.colunas_numericas));
-        setResultado(null);
-      })
-      .catch((e) => setErro(String(e)));
-  }, [dataset, modo]);
+    if (!base) return;
+
+    if (base.tipo === "painel") {
+      buscarInfoPainel(base.nome)
+        .then((i) => {
+          setInfo(i);
+          setChave(i.chave_sugerida);
+          setColunaTempo(i.tempo_sugerido);
+          setColunasValor(new Set(i.colunas_valor_disponiveis));
+        })
+        .catch((e) => setErro(String(e)));
+    } else {
+      buscarPreviewDataset(base.nome)
+        .then((p) => {
+          setColunasDisponiveisDireto(p.colunas_numericas);
+          setColunasX(new Set(p.colunas_numericas));
+        })
+        .catch((e) => setErro(String(e)));
+    }
+  }, [base]);
 
   function alternar(conjunto: Set<string>, item: string, aoMudar: (s: Set<string>) => void) {
     const novo = new Set(conjunto);
@@ -134,10 +138,10 @@ export default function FeatureLabPagina() {
     setEnviando(true);
     setErro(null);
     try {
-      const info = await uploadPainel(arquivoUpload, nomeUpload.trim());
-      const lista = await listarPaineis();
-      setPaineis(lista);
-      setPainel(info.nome);
+      const infoNova = await uploadPainel(arquivoUpload, nomeUpload.trim());
+      const lista = await listarBasesFeatureLab();
+      setBases(lista);
+      setBase({ nome: infoNova.nome, tipo: "painel" });
       setArquivoUpload(null);
       setNomeUpload("");
     } catch (e) {
@@ -147,51 +151,69 @@ export default function FeatureLabPagina() {
     }
   }
 
-  async function aoRodar() {
-    setRodando(true);
+  async function aoRodarEsfera1() {
+    if (!base) return;
+    const janelas = janelasTexto
+      .split(",")
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    if (colunasValor.size === 0) {
+      setErro("Selecione ao menos uma coluna de valor.");
+      return;
+    }
+    if (janelas.length === 0) {
+      setErro("Informe ao menos uma janela válida (ex.: 3,6).");
+      return;
+    }
+
+    setRodandoEsfera1(true);
     setErro(null);
     setResultado(null);
     try {
-      if (modo === "agregacao") {
-        const janelas = janelasTexto
-          .split(",")
-          .map((s) => Number(s.trim()))
-          .filter((n) => Number.isFinite(n) && n > 0);
-        if (colunasValor.size === 0) throw new Error("Selecione ao menos uma coluna de valor.");
-        if (janelas.length === 0) throw new Error("Informe ao menos uma janela válida (ex.: 3,6).");
-
-        const r = await rodarAgregacao({
-          painel,
-          chave,
-          coluna_tempo: colunaTempo,
-          colunas_valor: [...colunasValor],
-          janelas,
-          profundidade_maxima: profundidadeMaxima,
-          n_arvores: nArvores,
-          min_suporte: minSuporte,
-          max_suporte: maxSuporte,
-          max_regras: maxRegras,
-          permitir_cruzamento_entre_bases: permitirCruzamento,
-        });
-        setResultado(r);
-      } else {
-        if (colunasX.size === 0) throw new Error("Selecione ao menos uma coluna candidata.");
-        const r = await rodarDireto({
-          dataset,
-          colunas_x: [...colunasX],
-          profundidade_maxima: profundidadeMaxima,
-          n_arvores: nArvores,
-          min_suporte: minSuporte,
-          max_suporte: maxSuporte,
-          max_regras: maxRegras,
-          permitir_cruzamento_entre_bases: permitirCruzamento,
-        });
-        setResultado(r);
-      }
+      const r = await rodarAgregacao({
+        painel: base.nome,
+        chave,
+        coluna_tempo: colunaTempo,
+        colunas_valor: [...colunasValor],
+        janelas,
+      });
+      setResultadoEsfera1(r);
+      setColunasX(new Set(r.colunas_geradas));
     } catch (e) {
       setErro(String(e));
     } finally {
-      setRodando(false);
+      setRodandoEsfera1(false);
+    }
+  }
+
+  async function aoRodarEsfera2() {
+    if (!base) return;
+    if (colunasX.size === 0) {
+      setErro("Selecione ao menos uma coluna candidata.");
+      return;
+    }
+
+    setRodandoEsfera2(true);
+    setErro(null);
+    setResultado(null);
+    const parametros = {
+      profundidade_maxima: profundidadeMaxima,
+      n_arvores: nArvores,
+      min_suporte: minSuporte,
+      max_suporte: maxSuporte,
+      max_regras: maxRegras,
+      permitir_cruzamento_entre_bases: permitirCruzamento,
+    };
+    try {
+      const r =
+        base.tipo === "painel" && resultadoEsfera1
+          ? await descobrirEmTabela({ tabela: resultadoEsfera1.tabela, colunas_x: [...colunasX], ...parametros })
+          : await rodarDireto({ dataset: base.nome, colunas_x: [...colunasX], ...parametros });
+      setResultado(r);
+    } catch (e) {
+      setErro(String(e));
+    } finally {
+      setRodandoEsfera2(false);
     }
   }
 
@@ -202,6 +224,10 @@ export default function FeatureLabPagina() {
       setOrdemAsc(false);
     }
   }
+
+  const precisaEsfera1 = base?.tipo === "painel";
+  const esfera2Liberada = precisaEsfera1 ? resultadoEsfera1 !== null : colunasDisponiveisDireto.length > 0;
+  const colunasParaEsfera2 = precisaEsfera1 ? (resultadoEsfera1?.colunas_geradas ?? []) : colunasDisponiveisDireto;
 
   const regrasFiltradas: RegraFeatureLab[] = (resultado?.regras ?? [])
     .filter((r) => r.iv_teste >= ivMinimo)
@@ -218,7 +244,7 @@ export default function FeatureLabPagina() {
         <div>
           <h1 className="text-lg font-semibold text-slate-100">Feature-lab</h1>
           <p className="text-sm text-slate-500">
-            Construção e descoberta de features — experimental, desacoplado do Pedro_Wise por enquanto.
+            Base → agregação (esfera 1, se aplicável) → descoberta de interação (esfera 2).
           </p>
         </div>
         <Link href="/" className="text-xs text-slate-500 hover:text-emerald-400">
@@ -226,184 +252,87 @@ export default function FeatureLabPagina() {
         </Link>
       </header>
 
-      <div className="flex gap-1 rounded-lg bg-slate-900/70 p-1 w-fit">
-        {(["agregacao", "direto"] as Modo[]).map((m) => (
-          <button
-            key={m}
-            onClick={() => {
-              setModo(m);
-              setResultado(null);
-            }}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition ${
-              modo === m ? "bg-slate-700 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            {m === "agregacao" ? "Com agregação (painel)" : "Direto (dataset existente)"}
-          </button>
-        ))}
-      </div>
-      <p className="-mt-3 text-xs text-slate-500">
-        {modo === "agregacao"
-          ? "Painel mensal (chave + tempo + valores) — passa pela esfera 1 antes da descoberta de interação."
-          : "Base já flat (uma linha por observação, sem granularidade de painel) — pula direto pra descoberta de interação."}
-      </p>
-
-      {modo === "agregacao" ? (
-        <>
-          <Secao titulo="Painel">
-            <div className="flex flex-wrap items-end gap-4">
-              <div>
-                <label className="mb-1 block text-[11px] text-slate-500">dataset de painel</label>
-                <select
-                  value={painel}
-                  onChange={(e) => setPainel(e.target.value)}
-                  className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-                >
-                  {paineis.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {info && (
-                <>
-                  <div>
-                    <label className="mb-1 block text-[11px] text-slate-500">chave</label>
-                    <select
-                      value={chave}
-                      onChange={(e) => setChave(e.target.value)}
-                      className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-                    >
-                      {info.colunas.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-[11px] text-slate-500">coluna de tempo/safra</label>
-                    <select
-                      value={colunaTempo}
-                      onChange={(e) => setColunaTempo(e.target.value)}
-                      className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-                    >
-                      {info.colunas.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    {info.n_linhas.toLocaleString("pt-BR")} linhas, {info.n_chaves.toLocaleString("pt-BR")} chaves
-                  </p>
-                </>
-              )}
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-slate-800 pt-4">
-              <div>
-                <label className="mb-1 block text-[11px] text-slate-500">novo painel (CSV)</label>
-                <input
-                  type="file"
-                  accept=".csv"
-                  onChange={(e) => setArquivoUpload(e.target.files?.[0] ?? null)}
-                  className="block text-xs text-slate-400 file:mr-2 file:rounded file:border-0 file:bg-slate-700 file:px-2 file:py-1 file:text-xs file:text-slate-200"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-[11px] text-slate-500">nome</label>
-                <input
-                  type="text"
-                  value={nomeUpload}
-                  onChange={(e) => setNomeUpload(e.target.value)}
-                  placeholder="meu-painel"
-                  className="w-36 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-                />
-              </div>
-              <button
-                onClick={aoEnviarPainel}
-                disabled={enviando || !arquivoUpload || !nomeUpload.trim()}
-                className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-700 hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {enviando ? "Enviando…" : "Enviar painel"}
-              </button>
-            </div>
-          </Secao>
-
-          {info && (
-            <Secao titulo="Esfera 1 — agregação temporal">
-              <div className="flex flex-col gap-3">
-                <div>
-                  <p className="mb-1.5 text-[11px] text-slate-500">
-                    colunas brutas a agregar (máximo/média/mínimo/desvio/tendência por janela)
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {info.colunas_valor_disponiveis.map((c) => (
-                      <label
-                        key={c}
-                        className="flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={colunasValor.has(c)}
-                          onChange={() => alternar(colunasValor, c, setColunasValor)}
-                          className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
-                        />
-                        {c}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="mb-1 block text-[11px] text-slate-500">
-                    janelas (períodos, separadas por vírgula)
-                  </label>
-                  <input
-                    type="text"
-                    value={janelasTexto}
-                    onChange={(e) => setJanelasTexto(e.target.value)}
-                    placeholder="3,6,12"
-                    className="w-32 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-                  />
-                </div>
-              </div>
-            </Secao>
-          )}
-        </>
-      ) : (
-        <Secao titulo="Dataset">
-          <div className="flex flex-wrap items-end gap-4">
-            <div>
-              <label className="mb-1 block text-[11px] text-slate-500">dataset</label>
-              <select
-                value={dataset}
-                onChange={(e) => setDataset(e.target.value)}
-                className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-              >
-                {datasets.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-            </div>
+      {/* Etapa 1: base ------------------------------------------------- */}
+      <Secao titulo="1. Base">
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-500">dataset</label>
+            <select
+              value={base ? `${base.tipo}:${base.nome}` : ""}
+              onChange={(e) => {
+                const [tipo, nome] = e.target.value.split(":");
+                setBase({ tipo: tipo as BaseFeatureLab["tipo"], nome });
+              }}
+              className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+            >
+              {bases.map((b) => (
+                <option key={`${b.tipo}:${b.nome}`} value={`${b.tipo}:${b.nome}`}>
+                  {b.nome} ({b.tipo === "painel" ? "painel" : "flat"})
+                </option>
+              ))}
+            </select>
           </div>
-          {colunasDisponiveis.length > 0 && (
-            <div className="mt-4">
-              <p className="mb-1.5 text-[11px] text-slate-500">colunas candidatas (esfera 2)</p>
-              <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">
-                {colunasDisponiveis.map((c) => (
+          {info && (
+            <p className="text-xs text-slate-500">
+              {info.n_linhas.toLocaleString("pt-BR")} linhas, {info.n_chaves.toLocaleString("pt-BR")} chaves —
+              tem granularidade de painel, a esfera 1 abaixo é aplicável.
+            </p>
+          )}
+          {base?.tipo === "flat" && (
+            <p className="text-xs text-slate-500">
+              Base já flat — sem granularidade de painel, pula direto pra esfera 2.
+            </p>
+          )}
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-slate-800 pt-4">
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-500">enviar novo painel (CSV)</label>
+            <input
+              type="file"
+              accept=".csv"
+              onChange={(e) => setArquivoUpload(e.target.files?.[0] ?? null)}
+              className="block text-xs text-slate-400 file:mr-2 file:rounded file:border-0 file:bg-slate-700 file:px-2 file:py-1 file:text-xs file:text-slate-200"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-500">nome</label>
+            <input
+              type="text"
+              value={nomeUpload}
+              onChange={(e) => setNomeUpload(e.target.value)}
+              placeholder="meu-painel"
+              className="w-36 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+            />
+          </div>
+          <button
+            onClick={aoEnviarPainel}
+            disabled={enviando || !arquivoUpload || !nomeUpload.trim()}
+            className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-700 hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {enviando ? "Enviando…" : "Enviar painel"}
+          </button>
+        </div>
+      </Secao>
+
+      {/* Etapa 2: esfera 1 (só se painel) --------------------------------- */}
+      {precisaEsfera1 && info && (
+        <Secao titulo="2. Esfera 1 — agregação temporal">
+          <div className="flex flex-col gap-3">
+            <div>
+              <p className="mb-1.5 text-[11px] text-slate-500">
+                colunas brutas a agregar (máximo/média/mínimo/desvio/tendência por janela)
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {info.colunas_valor_disponiveis.map((c) => (
                   <label
                     key={c}
                     className="flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
                   >
                     <input
                       type="checkbox"
-                      checked={colunasX.has(c)}
-                      onChange={() => alternar(colunasX, c, setColunasX)}
+                      checked={colunasValor.has(c)}
+                      onChange={() => alternar(colunasValor, c, setColunasValor)}
                       className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
                     />
                     {c}
@@ -411,108 +340,154 @@ export default function FeatureLabPagina() {
                 ))}
               </div>
             </div>
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-500">
+                janelas (períodos, separadas por vírgula)
+              </label>
+              <input
+                type="text"
+                value={janelasTexto}
+                onChange={(e) => setJanelasTexto(e.target.value)}
+                placeholder="3,6,12"
+                className="w-32 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              />
+            </div>
+          </div>
+          <button
+            onClick={aoRodarEsfera1}
+            disabled={rodandoEsfera1}
+            className="mt-4 rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {rodandoEsfera1 ? "Rodando…" : "Rodar esfera 1"}
+          </button>
+
+          {resultadoEsfera1 && (
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 border-t border-slate-800 pt-4">
+              <Metrica rotulo="linhas do painel" valor={resultadoEsfera1.n_linhas_painel.toLocaleString("pt-BR")} />
+              <Metrica rotulo="chaves" valor={resultadoEsfera1.n_chaves.toLocaleString("pt-BR")} />
+              <Metrica rotulo="colunas geradas" valor={String(resultadoEsfera1.colunas_geradas.length)} />
+              <Metrica rotulo="linhas resultantes" valor={resultadoEsfera1.tabela.length.toLocaleString("pt-BR")} />
+            </div>
           )}
         </Secao>
       )}
 
-      <Secao titulo="Esfera 2 — descoberta de interação">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-          <div>
-            <label className="mb-1 block text-[11px] text-slate-500">profundidade máxima</label>
-            <input
-              type="number"
-              min={2}
-              max={6}
-              value={profundidadeMaxima}
-              onChange={(e) => setProfundidadeMaxima(Number(e.target.value))}
-              className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-            />
+      {/* Etapa 3: esfera 2 -------------------------------------------------- */}
+      {esfera2Liberada && (
+        <Secao titulo={`${precisaEsfera1 ? "3" : "2"}. Esfera 2 — descoberta de interação`}>
+          <div className="mb-4">
+            <p className="mb-1.5 text-[11px] text-slate-500">colunas candidatas</p>
+            <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">
+              {colunasParaEsfera2.map((c) => (
+                <label
+                  key={c}
+                  className="flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
+                >
+                  <input
+                    type="checkbox"
+                    checked={colunasX.has(c)}
+                    onChange={() => alternar(colunasX, c, setColunasX)}
+                    className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+                  />
+                  {c}
+                </label>
+              ))}
+            </div>
           </div>
-          <div>
-            <label className="mb-1 block text-[11px] text-slate-500">nº árvores</label>
-            <input
-              type="number"
-              min={10}
-              max={300}
-              value={nArvores}
-              onChange={(e) => setNArvores(Number(e.target.value))}
-              className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-[11px] text-slate-500">suporte mínimo</label>
-            <input
-              type="number"
-              step={0.01}
-              min={0}
-              max={1}
-              value={minSuporte}
-              onChange={(e) => setMinSuporte(Number(e.target.value))}
-              className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-[11px] text-slate-500">suporte máximo</label>
-            <input
-              type="number"
-              step={0.01}
-              min={0}
-              max={1}
-              value={maxSuporte}
-              onChange={(e) => setMaxSuporte(Number(e.target.value))}
-              className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-[11px] text-slate-500">máx. regras exibidas</label>
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={maxRegras}
-              onChange={(e) => setMaxRegras(Number(e.target.value))}
-              className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-            />
-          </div>
-        </div>
-        <label className="mt-4 flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={permitirCruzamento}
-            onChange={(e) => setPermitirCruzamento(e.target.checked)}
-            className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
-          />
-          Permitir cruzar variáveis brutas diferentes numa mesma regra
-        </label>
-        <p className="mt-1 text-xs text-slate-500">
-          Desmarcado: cada regra só combina primitivas da mesma variável bruta — útil se regra de
-          negócio não quer misturar domínios diferentes numa condição só.
-        </p>
-      </Secao>
 
-      <div className="flex items-center gap-3">
-        <button
-          onClick={aoRodar}
-          disabled={rodando || (modo === "agregacao" ? !painel : !dataset)}
-          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {rodando ? "Rodando…" : "Rodar"}
-        </button>
-        {erro && <p className="text-sm text-red-400">{erro}</p>}
-      </div>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-500">profundidade máxima</label>
+              <input
+                type="number"
+                min={2}
+                max={6}
+                value={profundidadeMaxima}
+                onChange={(e) => setProfundidadeMaxima(Number(e.target.value))}
+                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-500">nº árvores</label>
+              <input
+                type="number"
+                min={10}
+                max={300}
+                value={nArvores}
+                onChange={(e) => setNArvores(Number(e.target.value))}
+                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-500">suporte mínimo</label>
+              <input
+                type="number"
+                step={0.01}
+                min={0}
+                max={1}
+                value={minSuporte}
+                onChange={(e) => setMinSuporte(Number(e.target.value))}
+                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-500">suporte máximo</label>
+              <input
+                type="number"
+                step={0.01}
+                min={0}
+                max={1}
+                value={maxSuporte}
+                onChange={(e) => setMaxSuporte(Number(e.target.value))}
+                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-500">máx. regras exibidas</label>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={maxRegras}
+                onChange={(e) => setMaxRegras(Number(e.target.value))}
+                className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+              />
+            </div>
+          </div>
+          <label className="mt-4 flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={permitirCruzamento}
+              onChange={(e) => setPermitirCruzamento(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+            />
+            Permitir cruzar variáveis brutas diferentes numa mesma regra
+          </label>
+          <p className="mt-1 text-xs text-slate-500">
+            Desmarcado: cada regra só combina primitivas da mesma variável bruta — útil se regra de
+            negócio não quer misturar domínios diferentes numa condição só.
+          </p>
 
+          <button
+            onClick={aoRodarEsfera2}
+            disabled={rodandoEsfera2}
+            className="mt-4 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {rodandoEsfera2 ? "Rodando…" : "Rodar esfera 2"}
+          </button>
+        </Secao>
+      )}
+
+      {erro && <p className="text-sm text-red-400">{erro}</p>}
+
+      {/* Resultado -------------------------------------------------------- */}
       {resultado && (
         <Secao titulo="Resultado">
-          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-            {resultado.n_linhas_painel !== undefined && (
-              <Metrica rotulo="linhas do painel" valor={resultado.n_linhas_painel.toLocaleString("pt-BR")} />
-            )}
-            {resultado.n_chaves !== undefined && (
-              <Metrica rotulo="chaves" valor={resultado.n_chaves.toLocaleString("pt-BR")} />
-            )}
+          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <Metrica rotulo="colunas candidatas" valor={String(resultado.colunas_x.length)} />
             <Metrica rotulo="dev / teste" valor={`${resultado.n_dev} / ${resultado.n_teste}`} />
             <Metrica rotulo="taxa evento dev" valor={`${(resultado.taxa_evento_dev * 100).toFixed(1)}%`} />
+            <Metrica rotulo="taxa evento teste" valor={`${(resultado.taxa_evento_teste * 100).toFixed(1)}%`} />
             <Metrica rotulo="tempo de execução" valor={`${resultado.tempo_execucao_segundos.toFixed(2)}s`} />
           </div>
 
