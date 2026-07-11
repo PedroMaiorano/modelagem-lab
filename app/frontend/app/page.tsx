@@ -1,12 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ArvoreBuscaAoVivo from "./components/ArvoreBuscaAoVivo";
 import GraficoScoreAoVivo from "./components/GraficoScoreAoVivo";
 import ModeloAoVivo from "./components/ModeloAoVivo";
 import PainelConfig from "./components/PainelConfig";
 import PainelDatasetInfo from "./components/PainelDatasetInfo";
-import PainelFeatureLab from "./components/PainelFeatureLab";
 import PainelModulos from "./components/PainelModulos";
 import PainelUpload from "./components/PainelUpload";
 import SidebarDataset from "./components/SidebarDataset";
@@ -54,7 +54,6 @@ const ABAS = [
   { id: "modulos", rotulo: "Módulos" },
   { id: "treinamento", rotulo: "Treinamento" },
   { id: "resultados", rotulo: "Resultados" },
-  { id: "feature-lab", rotulo: "Feature-lab" },
 ] as const;
 
 type Aba = (typeof ABAS)[number]["id"];
@@ -165,9 +164,17 @@ export default function Pagina() {
               Construção → categorização → transformação → treinamento, em tempo real.
             </p>
           </div>
-          <div className="flex items-center gap-1.5 rounded-full border border-slate-700 px-2.5 py-1 text-[11px] text-slate-500">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            backend conectado
+          <div className="flex items-center gap-3">
+            <Link
+              href="/feature-lab"
+              className="text-xs text-slate-500 underline decoration-dotted hover:text-emerald-400"
+            >
+              Feature-lab (experimental) →
+            </Link>
+            <div className="flex items-center gap-1.5 rounded-full border border-slate-700 px-2.5 py-1 text-[11px] text-slate-500">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              backend conectado
+            </div>
           </div>
         </header>
 
@@ -273,10 +280,6 @@ export default function Pagina() {
               seleção&rdquo; na barra lateral.
             </p>
           )}
-        </div>
-
-        <div className={aba === "feature-lab" ? "" : "hidden"}>
-          <PainelFeatureLab />
         </div>
       </main>
     </div>

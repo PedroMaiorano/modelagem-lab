@@ -1,18 +1,24 @@
 """Lógica do backend pro Feature-lab (esferas 1/2 — agregação temporal e
 descoberta de interação, ver `python/agregacao_temporal` e `python/interacao`).
-Este módulo só orquestra: lê o painel de disco, chama o core, empacota
-resultado pra API — mesma regra do resto do backend (núcleo em `python/`,
-backend nunca reimplementa lógica de modelagem, ver `logica.py`).
+Este módulo só orquestra: lê dado de disco, chama o core, empacota resultado
+pra API — mesma regra do resto do backend (núcleo em `python/`, backend
+nunca reimplementa lógica de modelagem, ver `logica.py`).
 
-Fonte de dado por enquanto: pastas em `data/` com `painel.csv` (uma linha
-por chave-tempo) e opcionalmente `agregado.csv` (alvo `y`, uma linha por
-chave) — o mesmo formato que `scripts/gerar_dataset_painel_atraso.py` já
-produz. Upload de painel real fica pra uma próxima etapa.
+Duas fontes de dado, desacopladas de propósito (feedback real: nem todo
+dataset tem granularidade de painel mensal, e forçar por esfera 1 pra
+chegar na esfera 2 não faz sentido nesse caso):
+
+- **Painel** (`data/{nome}/painel.csv`, uma linha por chave-tempo): passa
+  pela esfera 1 (`agregar_painel`) antes da esfera 2.
+- **Direto** (qualquer dataset já flat, os mesmos `dev.csv`/`teste.csv` que
+  o Pedro_Wise usa, via `logica.carregar_dataset`): pula a esfera 1, vai
+  direto pra esfera 2 com as colunas escolhidas como candidatas.
 """
 
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -20,11 +26,12 @@ _RAIZ = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_RAIZ / "python"))
 
 import pandas as pd  # noqa: E402
-from agregacao_temporal import construir_agregados_janela, normalizar_safra  # noqa: E402
+from agregacao_temporal import (  # noqa: E402
+    construir_agregados_janela,
+    extrair_base_agregado,
+    normalizar_safra,
+)
 from interacao import avaliar_estabilidade, extrair_candidatas  # noqa: E402
-from sklearn.linear_model import LogisticRegression  # noqa: E402
-from sklearn.metrics import roc_auc_score  # noqa: E402
-from sklearn.preprocessing import StandardScaler  # noqa: E402
 
 DIR_PAINEIS = _RAIZ / "data"
 
@@ -34,7 +41,7 @@ _CANDIDATOS_TEMPO = {"safra", "data", "mes", "tempo", "competencia", "anomes"}
 
 
 def listar_paineis() -> list[str]:
-    """Pastas em `data/` que têm `painel.csv` -- candidatas a Feature-lab."""
+    """Pastas em `data/` que têm `painel.csv` -- candidatas ao modo agregação."""
     if not DIR_PAINEIS.exists():
         return []
     return sorted(p.name for p in DIR_PAINEIS.iterdir() if p.is_dir() and (p / "painel.csv").exists())
@@ -64,33 +71,33 @@ def info_painel(nome: str) -> dict[str, Any]:
     }
 
 
-def _auc(X_dev: pd.DataFrame, y_dev: pd.Series, X_teste: pd.DataFrame, y_teste: pd.Series) -> float:
-    # Escala (fit só em dev) -- variáveis com magnitudes bem diferentes
-    # (dias vs. reais, por ex.) fazem o solver não convergir sem isso.
-    escala = StandardScaler().fit(X_dev)
-    modelo = LogisticRegression(max_iter=1000).fit(escala.transform(X_dev), y_dev)
-    return float(roc_auc_score(y_teste, modelo.predict_proba(escala.transform(X_teste))[:, 1]))
+def salvar_painel(nome: str, conteudo: pd.DataFrame) -> dict[str, Any]:
+    """Grava um painel novo em `data/{nome}/painel.csv` -- fonte de dado pro
+    modo agregação. Sem split dev/teste aqui (isso acontece na esfera 2, a
+    partir do resultado já agregado uma-linha-por-chave)."""
+    if conteudo.empty:
+        raise ValueError("Arquivo vazio")
+    if len(conteudo.columns) < 2:
+        raise ValueError("Painel precisa de pelo menos 2 colunas (chave e um valor)")
+
+    nome_seguro = "".join(c for c in nome if c.isalnum() or c in "-_") or "painel"
+    pasta = DIR_PAINEIS / nome_seguro
+    pasta.mkdir(parents=True, exist_ok=True)
+    conteudo.to_csv(pasta / "painel.csv", index=False)
+    return info_painel(nome_seguro) | {"nome": nome_seguro}
 
 
-def rodar_feature_lab(
+def agregar_painel(
     painel: str,
     chave: str,
     coluna_tempo: str,
     colunas_valor: list[str],
     janelas: list[int],
-    profundidade_maxima: int = 2,
-    n_arvores: int = 60,
-    min_suporte: float = 0.02,
-    max_suporte: float = 0.5,
-    max_regras: int = 10,
-    permitir_cruzamento_entre_bases: bool = True,
-    semente: int = 0,
 ) -> dict[str, Any]:
-    """Roda esfera 1 (agregação) + esfera 2 (descoberta de interação +
-    validação out-of-time) de ponta a ponta -- mesmo fluxo de
-    `scripts/explorar_feature_lab.py`, empacotado pra API. Sem estado entre
-    chamadas (mesma filosofia do resto do playground de Módulos): cada
-    requisição recalcula tudo do zero a partir dos parâmetros recebidos.
+    """Esfera 1: roda `construir_agregados_janela` pra cada `colunas_valor` e
+    reduz a uma linha por chave (último período). Devolve a tabela pronta
+    (com `y`, se disponível em `agregado.csv`), a lista de colunas geradas,
+    e as contagens brutas do painel (pra resumo na interface).
     """
     pasta = DIR_PAINEIS / painel
     caminho_painel = pasta / "painel.csv"
@@ -120,26 +127,55 @@ def rodar_feature_lab(
         alvo = pd.read_csv(caminho_alvo)[[chave, "y"]]
         por_chave = por_chave.merge(alvo, on=chave, how="inner")
 
-    rng_split = por_chave.sample(frac=1, random_state=semente)
-    metade = len(rng_split) // 2
-    dev, teste = rng_split.iloc[:metade], rng_split.iloc[metade:]
-    X_dev, y_dev = dev[colunas_geradas], dev["y"]
-    X_teste, y_teste = teste[colunas_geradas], teste["y"]
-
-    resultado: dict[str, Any] = {
+    return {
+        "tabela": por_chave,
+        "colunas_geradas": colunas_geradas,
         "n_linhas_painel": len(df),
         "n_chaves": int(df[chave].nunique()),
-        "colunas_geradas": colunas_geradas,
-        "n_dev": len(dev),
-        "n_teste": len(teste),
-        "taxa_evento_dev": float(y_dev.mean()),
-        "taxa_evento_teste": float(y_teste.mean()),
-        "regras": [],
-        "melhor_regra": None,
-        "auc_sem_regra": None,
-        "auc_com_regra": None,
     }
 
+
+def _empacotar_regras(regras: list[Any], tabela: pd.DataFrame) -> list[dict[str, Any]]:
+    """Junta a tabela de estabilidade (suporte/IV dev x teste) com metadados
+    estruturais de cada regra (nº de condições, nº de variáveis distintas) --
+    o que a interface precisa pra ordenar/filtrar por complexidade, não só
+    por poder preditivo."""
+    por_nome = {r.nome: r for r in regras}
+    linhas = []
+    for _, linha in tabela.iterrows():
+        regra = por_nome[linha["regra"]]
+        variaveis = {extrair_base_agregado(c.feature) for c in regra.condicoes}
+        linhas.append(
+            {
+                "regra": linha["regra"],
+                "n_condicoes": len(regra.condicoes),
+                "n_variaveis": len(variaveis),
+                "suporte_dev": float(linha["suporte_dev"]),
+                "suporte_teste": float(linha["suporte_teste"]),
+                "iv_dev": float(linha["iv_dev"]),
+                "iv_teste": float(linha["iv_teste"]),
+            }
+        )
+    return linhas
+
+
+def _descobrir(
+    X_dev: pd.DataFrame,
+    y_dev: pd.Series,
+    X_teste: pd.DataFrame,
+    y_teste: pd.Series,
+    profundidade_maxima: int,
+    n_arvores: int,
+    min_suporte: float,
+    max_suporte: float,
+    max_regras: int,
+    permitir_cruzamento_entre_bases: bool,
+    semente: int = 0,
+) -> dict[str, Any]:
+    """Esfera 2 + validação out-of-time, empacotado pra API. Não depende de
+    nada de painel/agregação -- roda sobre qualquer par (X, y) já dividido
+    em dev/teste."""
+    t0 = time.perf_counter()
     regras = extrair_candidatas(
         X_dev,
         y_dev,
@@ -151,19 +187,96 @@ def rodar_feature_lab(
         semente=semente,
         permitir_cruzamento_entre_bases=permitir_cruzamento_entre_bases,
     )
-    if not regras:
-        return resultado
+    regras_empacotadas: list[dict[str, Any]] = []
+    if regras:
+        tabela = avaliar_estabilidade(regras, X_dev, y_dev, X_teste, y_teste)
+        regras_empacotadas = _empacotar_regras(regras, tabela)
+    tempo_execucao = time.perf_counter() - t0
 
-    tabela = avaliar_estabilidade(regras, X_dev, y_dev, X_teste, y_teste)
-    resultado["regras"] = tabela.to_dict(orient="records")
+    return {
+        "colunas_x": list(X_dev.columns),
+        "n_dev": len(X_dev),
+        "n_teste": len(X_teste),
+        "taxa_evento_dev": float(y_dev.mean()),
+        "taxa_evento_teste": float(y_teste.mean()),
+        "regras": regras_empacotadas,
+        "tempo_execucao_segundos": round(tempo_execucao, 2),
+    }
 
-    melhor = regras[0]
-    auc_sem = _auc(X_dev, y_dev, X_teste, y_teste)
-    X_dev_regra = X_dev.assign(_regra=melhor.aplicar(X_dev).astype(int))
-    X_teste_regra = X_teste.assign(_regra=melhor.aplicar(X_teste).astype(int))
-    auc_com = _auc(X_dev_regra, y_dev, X_teste_regra, y_teste)
 
-    resultado["melhor_regra"] = melhor.nome
-    resultado["auc_sem_regra"] = auc_sem
-    resultado["auc_com_regra"] = auc_com
+def rodar_agregacao(
+    painel: str,
+    chave: str,
+    coluna_tempo: str,
+    colunas_valor: list[str],
+    janelas: list[int],
+    profundidade_maxima: int = 2,
+    n_arvores: int = 60,
+    min_suporte: float = 0.02,
+    max_suporte: float = 0.5,
+    max_regras: int = 10,
+    permitir_cruzamento_entre_bases: bool = True,
+    semente: int = 0,
+) -> dict[str, Any]:
+    """Modo com agregação: esfera 1 (painel -> uma linha por chave) seguida
+    da esfera 2 sobre o resultado."""
+    agregacao = agregar_painel(painel, chave, coluna_tempo, colunas_valor, janelas)
+    por_chave, colunas_geradas = agregacao["tabela"], agregacao["colunas_geradas"]
+
+    rng_split = por_chave.sample(frac=1, random_state=semente)
+    metade = len(rng_split) // 2
+    dev, teste = rng_split.iloc[:metade], rng_split.iloc[metade:]
+
+    resultado = _descobrir(
+        dev[colunas_geradas],
+        dev["y"],
+        teste[colunas_geradas],
+        teste["y"],
+        profundidade_maxima,
+        n_arvores,
+        min_suporte,
+        max_suporte,
+        max_regras,
+        permitir_cruzamento_entre_bases,
+        semente,
+    )
+    resultado["n_linhas_painel"] = agregacao["n_linhas_painel"]
+    resultado["n_chaves"] = agregacao["n_chaves"]
     return resultado
+
+
+def rodar_direto(
+    dataset: str,
+    colunas_x: list[str],
+    profundidade_maxima: int = 2,
+    n_arvores: int = 60,
+    min_suporte: float = 0.02,
+    max_suporte: float = 0.5,
+    max_regras: int = 10,
+    permitir_cruzamento_entre_bases: bool = True,
+) -> dict[str, Any]:
+    """Modo direto: pula a esfera 1 -- usa um dataset já flat (mesmo
+    dev.csv/teste.csv do Pedro_Wise, já com split dev/teste pronto) direto
+    na esfera 2. Pra bases sem granularidade de painel mensal."""
+    from logica import carregar_dataset  # import tardio evita ciclo com main.py
+
+    if not colunas_x:
+        raise ValueError("Selecione ao menos uma coluna candidata")
+
+    df_dev, df_teste = carregar_dataset(dataset)
+    faltando = [c for c in [*colunas_x, "y"] if c not in df_dev.columns]
+    if faltando:
+        raise ValueError(f"Coluna(s) ausente(s) no dataset: {faltando}")
+
+    return _descobrir(
+        df_dev[colunas_x],
+        df_dev["y"],
+        df_teste[colunas_x],
+        df_teste["y"],
+        profundidade_maxima,
+        n_arvores,
+        min_suporte,
+        max_suporte,
+        max_regras,
+        permitir_cruzamento_entre_bases,
+    )

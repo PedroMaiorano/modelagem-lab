@@ -384,7 +384,7 @@ export interface InfoPainel {
   n_chaves: number;
 }
 
-export interface ConfigFeatureLab {
+export interface ConfigAgregacao {
   painel: string;
   chave: string;
   coluna_tempo: string;
@@ -398,8 +398,21 @@ export interface ConfigFeatureLab {
   permitir_cruzamento_entre_bases: boolean;
 }
 
+export interface ConfigDireto {
+  dataset: string;
+  colunas_x: string[];
+  profundidade_maxima: number;
+  n_arvores: number;
+  min_suporte: number;
+  max_suporte: number;
+  max_regras: number;
+  permitir_cruzamento_entre_bases: boolean;
+}
+
 export interface RegraFeatureLab {
   regra: string;
+  n_condicoes: number;
+  n_variaveis: number;
   suporte_dev: number;
   suporte_teste: number;
   iv_dev: number;
@@ -407,17 +420,19 @@ export interface RegraFeatureLab {
 }
 
 export interface ResultadoFeatureLab {
-  n_linhas_painel: number;
-  n_chaves: number;
-  colunas_geradas: string[];
+  n_linhas_painel?: number;
+  n_chaves?: number;
+  colunas_x: string[];
   n_dev: number;
   n_teste: number;
   taxa_evento_dev: number;
   taxa_evento_teste: number;
   regras: RegraFeatureLab[];
-  melhor_regra: string | null;
-  auc_sem_regra: number | null;
-  auc_com_regra: number | null;
+  tempo_execucao_segundos: number;
+}
+
+export interface RespostaUploadPainel extends InfoPainel {
+  nome: string;
 }
 
 export async function listarPaineis(): Promise<string[]> {
@@ -432,15 +447,40 @@ export async function buscarInfoPainel(nome: string): Promise<InfoPainel> {
   return resp.json();
 }
 
-export async function rodarFeatureLab(config: ConfigFeatureLab): Promise<ResultadoFeatureLab> {
-  const resp = await fetch(`${URL_API}/api/feature-lab/rodar`, {
+export async function uploadPainel(arquivo: File, nome: string): Promise<RespostaUploadPainel> {
+  const form = new FormData();
+  form.append("arquivo", arquivo);
+  form.append("nome", nome);
+  const resp = await fetch(`${URL_API}/api/feature-lab/paineis/upload`, { method: "POST", body: form });
+  if (!resp.ok) {
+    const corpo = await resp.json().catch(() => null);
+    throw new Error(corpo?.detail ?? `Falha ao enviar painel (${resp.status})`);
+  }
+  return resp.json();
+}
+
+export async function rodarAgregacao(config: ConfigAgregacao): Promise<ResultadoFeatureLab> {
+  const resp = await fetch(`${URL_API}/api/feature-lab/agregacao`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(config),
   });
   if (!resp.ok) {
     const corpo = await resp.json().catch(() => null);
-    throw new Error(corpo?.detail ?? `Falha ao rodar feature-lab (${resp.status})`);
+    throw new Error(corpo?.detail ?? `Falha ao rodar agregação (${resp.status})`);
+  }
+  return resp.json();
+}
+
+export async function rodarDireto(config: ConfigDireto): Promise<ResultadoFeatureLab> {
+  const resp = await fetch(`${URL_API}/api/feature-lab/direto`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!resp.ok) {
+    const corpo = await resp.json().catch(() => null);
+    throw new Error(corpo?.detail ?? `Falha ao rodar (${resp.status})`);
   }
   return resp.json();
 }

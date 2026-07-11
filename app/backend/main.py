@@ -17,9 +17,9 @@ import threading
 from typing import Annotated, Any, Literal
 
 import pandas as pd
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from feature_lab import info_painel, listar_paineis, rodar_feature_lab
+from feature_lab import info_painel, listar_paineis, rodar_agregacao, rodar_direto, salvar_painel
 from ingestao import (
     calcular_corte_por_percentual,
     carregar_staging,
@@ -389,7 +389,22 @@ def rota_info_painel(nome: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
-class ConfigFeatureLab(BaseModel):
+@app.post("/api/feature-lab/paineis/upload")
+async def rota_upload_painel(
+    arquivo: Annotated[UploadFile, File()], nome: Annotated[str, Form()]
+) -> dict[str, Any]:
+    conteudo = await arquivo.read()
+    try:
+        df = pd.read_csv(io.BytesIO(conteudo))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Não consegui ler o CSV: {e}") from e
+    try:
+        return salvar_painel(nome, df)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+class ConfigAgregacao(BaseModel):
     painel: str
     chave: str
     coluna_tempo: str
@@ -403,15 +418,45 @@ class ConfigFeatureLab(BaseModel):
     permitir_cruzamento_entre_bases: bool = True
 
 
-@app.post("/api/feature-lab/rodar")
-def rota_rodar_feature_lab(config: ConfigFeatureLab) -> dict[str, Any]:
+@app.post("/api/feature-lab/agregacao")
+def rota_rodar_agregacao(config: ConfigAgregacao) -> dict[str, Any]:
     try:
-        return rodar_feature_lab(
+        return rodar_agregacao(
             painel=config.painel,
             chave=config.chave,
             coluna_tempo=config.coluna_tempo,
             colunas_valor=config.colunas_valor,
             janelas=config.janelas,
+            profundidade_maxima=config.profundidade_maxima,
+            n_arvores=config.n_arvores,
+            min_suporte=config.min_suporte,
+            max_suporte=config.max_suporte,
+            max_regras=config.max_regras,
+            permitir_cruzamento_entre_bases=config.permitir_cruzamento_entre_bases,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+class ConfigDireto(BaseModel):
+    dataset: str
+    colunas_x: list[str]
+    profundidade_maxima: int = 2
+    n_arvores: int = 60
+    min_suporte: float = 0.02
+    max_suporte: float = 0.5
+    max_regras: int = 10
+    permitir_cruzamento_entre_bases: bool = True
+
+
+@app.post("/api/feature-lab/direto")
+def rota_rodar_direto(config: ConfigDireto) -> dict[str, Any]:
+    if config.dataset not in listar_datasets():
+        raise HTTPException(status_code=404, detail=f"Dataset '{config.dataset}' não encontrado")
+    try:
+        return rodar_direto(
+            dataset=config.dataset,
+            colunas_x=config.colunas_x,
             profundidade_maxima=config.profundidade_maxima,
             n_arvores=config.n_arvores,
             min_suporte=config.min_suporte,
