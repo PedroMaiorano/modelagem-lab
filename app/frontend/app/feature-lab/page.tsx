@@ -8,6 +8,7 @@ import {
   buscarInfoPainel,
   buscarPreviewDataset,
   carregarBaseBruta,
+  compararComPedroWise,
   descobrirEmTabela,
   listarBasesFeatureLab,
   rodarAgregacao,
@@ -18,6 +19,7 @@ import {
   type InfoPainel,
   type RegraFeatureLab,
   type ResultadoAgregacao,
+  type ResultadoComparacaoPedroWise,
   type ResultadoFeatureLab,
   type ResultadoRegressaoManual,
 } from "../lib/api";
@@ -86,6 +88,11 @@ export default function FeatureLabPagina() {
   const [maxRegras, setMaxRegras] = useState(20);
   const [permitirCruzamento, setPermitirCruzamento] = useState(true);
   const [proporcaoVariaveis, setProporcaoVariaveis] = useState<string>("");
+  // variáveis numéricas que o usuário marcou pra WOE-codificar antes da
+  // esfera 2 -- pra código categórico sem ordem real (ex.: Thallium no
+  // Heart Disease: 3/6/7 não é uma escala). Colunas de texto não precisam
+  // estar aqui, entram nesse tratamento automaticamente no backend.
+  const [colunasCategoricasMarcadas, setColunasCategoricasMarcadas] = useState<Set<string>>(new Set());
   const [rodandoEsfera2, setRodandoEsfera2] = useState(false);
   const [resultado, setResultado] = useState<ResultadoFeatureLab | null>(null);
 
@@ -97,8 +104,18 @@ export default function FeatureLabPagina() {
 
   // --- esfera 3 ---
   const [colunasX3, setColunasX3] = useState<Set<string>>(new Set());
+  // regras de interação descobertas na esfera 2 (identificadas pelo nome da
+  // regra) que o usuário quer usar como variável 0/1 na regressão manual --
+  // materializadas dentro do próprio backend (ver rodar_regressao_manual),
+  // não aqui no cliente.
+  const [regrasX3, setRegrasX3] = useState<Set<string>>(new Set());
   const [rodandoEsfera3, setRodandoEsfera3] = useState(false);
   const [resultadoEsfera3, setResultadoEsfera3] = useState<ResultadoRegressaoManual | null>(null);
+  // comparação "prova de valor": stepwise real do Pedro_Wise com vs. sem as
+  // regras selecionadas como candidata -- usa as mesmas colunasX3/regrasX3
+  // já escolhidas acima.
+  const [rodandoComparacao, setRodandoComparacao] = useState(false);
+  const [resultadoComparacao, setResultadoComparacao] = useState<ResultadoComparacaoPedroWise | null>(null);
 
   // --- resultado: ordenação/filtro ---
   const [ordenarPor, setOrdenarPor] = useState<CampoOrdenacao>("iv_teste");
@@ -127,10 +144,14 @@ export default function FeatureLabPagina() {
     setResultadoEsfera1(null);
     setResultado(null);
     setResultadoEsfera3(null);
+    setResultadoComparacao(null);
     setFonteEsfera2("bruta");
     setColunaSplit("");
     setValoresDevSplit(new Set());
     setValoresTesteSplit(new Set());
+    setRegrasX3(new Set());
+    setColunasCategoricasMarcadas(new Set());
+    setErro(null);
   }
 
   useEffect(() => {
@@ -270,33 +291,45 @@ export default function FeatureLabPagina() {
     setRodandoEsfera2(true);
     setErro(null);
     const proporcao = proporcaoVariaveis.trim() === "" ? null : Number(proporcaoVariaveis);
-    const parametros = {
+    const parametrosBase = {
       profundidade_maxima: profundidadeMaxima,
       n_arvores: nArvores,
       min_suporte: minSuporte,
       max_suporte: maxSuporte,
       max_regras: maxRegras,
       permitir_cruzamento_entre_bases: permitirCruzamento,
-      coluna_y: colunaY,
       proporcao_variaveis_por_split: proporcao,
+      colunas_categoricas: [...colunasCategoricasMarcadas],
     };
     const usaRodarDireto = fonteEsfera2 === "bruta" && base.tipo === "flat";
     const paramsSplit = construirParamsSplit(usaRodarDireto);
     try {
       let r: ResultadoFeatureLab;
       if (fonteEsfera2 === "esfera1") {
+        // resultadoEsfera1.tabela já veio de agregar_base com a coluna
+        // resposta renomeada pra "y" -- mandar colunaY (nome original) de
+        // novo aqui faria descobrirEmTabela procurar uma coluna que não
+        // existe mais na tabela já processada.
         if (!resultadoEsfera1) throw new Error("Rode a esfera 1 primeiro, ou troque a fonte pra 'colunas cruas'.");
         r = await descobrirEmTabela({
           tabela: resultadoEsfera1.tabela,
           colunas_x: [...colunasX],
-          ...parametros,
+          ...parametrosBase,
+          coluna_y: "y",
           ...paramsSplit,
         });
       } else if (usaRodarDireto) {
-        r = await rodarDireto({ dataset: base.nome, colunas_x: [...colunasX], ...parametros });
+        r = await rodarDireto({ dataset: base.nome, colunas_x: [...colunasX], ...parametrosBase, coluna_y: colunaY });
       } else {
+        // mesma coisa: carregarBaseBruta já renomeia coluna_y -> "y" no backend.
         const bruta = await carregarBaseBruta(base.nome, base.tipo, colunaY);
-        r = await descobrirEmTabela({ tabela: bruta.tabela, colunas_x: [...colunasX], ...parametros, ...paramsSplit });
+        r = await descobrirEmTabela({
+          tabela: bruta.tabela,
+          colunas_x: [...colunasX],
+          ...parametrosBase,
+          coluna_y: "y",
+          ...paramsSplit,
+        });
       }
       setResultado(r);
     } catch (e) {
@@ -308,8 +341,8 @@ export default function FeatureLabPagina() {
 
   async function aoRodarEsfera3() {
     if (!base) return;
-    if (colunasX3.size === 0) {
-      setErro("Selecione ao menos uma coluna.");
+    if (colunasX3.size === 0 && regrasX3.size === 0) {
+      setErro("Selecione ao menos uma coluna ou regra.");
       return;
     }
     if (fonteEsfera2 === "esfera1" && !resultadoEsfera1) {
@@ -320,14 +353,25 @@ export default function FeatureLabPagina() {
     setRodandoEsfera3(true);
     setErro(null);
     try {
+      // as duas fontes (agregar_base e carregarBaseBruta) já renomeiam a
+      // coluna resposta pra "y" no backend -- nunca colunaY (nome original)
+      // aqui, mesma causa do bug corrigido em aoRodarEsfera2.
       const tabela =
         fonteEsfera2 === "esfera1" && resultadoEsfera1
           ? resultadoEsfera1.tabela
           : (await carregarBaseBruta(base.nome, base.tipo, colunaY)).tabela;
+      // regras (se houver) são materializadas dentro do próprio backend,
+      // na mesma chamada -- split + WOE de categórica + materialização de
+      // regra precisam acontecer juntos (ver rodar_regressao_manual),
+      // senão uma regra que referencie uma coluna WOE (ex.: Thallium_woe)
+      // não encontra essa coluna, que só existe depois do split+WOE.
+      const regrasSelecionadas = resultado ? resultado.regras.filter((r) => regrasX3.has(r.regra)) : [];
       const r = await rodarRegressaoManual({
         tabela,
         colunas_x: [...colunasX3],
-        coluna_y: colunaY,
+        coluna_y: "y",
+        regras: regrasSelecionadas.map((rg) => ({ condicoes: rg.condicoes })),
+        colunas_categoricas: [...colunasCategoricasMarcadas],
         ...construirParamsSplit(false),
       });
       setResultadoEsfera3(r);
@@ -335,6 +379,41 @@ export default function FeatureLabPagina() {
       setErro(String(e));
     } finally {
       setRodandoEsfera3(false);
+    }
+  }
+
+  async function aoRodarComparacao() {
+    if (!base) return;
+    if (colunasX3.size === 0) {
+      setErro("Selecione ao menos uma coluna base pra comparar.");
+      return;
+    }
+    if (fonteEsfera2 === "esfera1" && !resultadoEsfera1) {
+      setErro("Rode a esfera 1 primeiro, ou troque a fonte pra 'colunas da base' na aba Esfera 2.");
+      return;
+    }
+
+    setRodandoComparacao(true);
+    setErro(null);
+    try {
+      const tabela =
+        fonteEsfera2 === "esfera1" && resultadoEsfera1
+          ? resultadoEsfera1.tabela
+          : (await carregarBaseBruta(base.nome, base.tipo, colunaY)).tabela;
+      const regrasSelecionadas = resultado ? resultado.regras.filter((r) => regrasX3.has(r.regra)) : [];
+      const r = await compararComPedroWise({
+        tabela,
+        colunas_base: [...colunasX3],
+        regras: regrasSelecionadas.map((rg) => ({ condicoes: rg.condicoes })),
+        coluna_y: "y",
+        colunas_categoricas: [...colunasCategoricasMarcadas],
+        ...construirParamsSplit(false),
+      });
+      setResultadoComparacao(r);
+    } catch (e) {
+      setErro(String(e));
+    } finally {
+      setRodandoComparacao(false);
     }
   }
 
@@ -357,9 +436,12 @@ export default function FeatureLabPagina() {
     setResultadoEsfera1(null);
     setResultado(null);
     setResultadoEsfera3(null);
+    setResultadoComparacao(null);
     setFonteEsfera2("bruta");
     setColunasX(new Set());
     setColunasX3(new Set());
+    setRegrasX3(new Set());
+    setColunasCategoricasMarcadas(new Set());
     setProporcaoVariaveis("");
     setMetodoSplit("aleatorio");
     setColunaSplit("");
@@ -390,7 +472,13 @@ export default function FeatureLabPagina() {
   const colunasOriginaisComIv = [...(resultadoEsfera1?.colunas_originais ?? [])].sort(
     (a, b) => (resultadoEsfera1?.ivs_originais[b] ?? 0) - (resultadoEsfera1?.ivs_originais[a] ?? 0),
   );
-  const colunasParaEsfera2 = fonteEsfera2 === "esfera1" ? (resultadoEsfera1?.colunas_geradas ?? []) : colunasNumericasBase;
+  // colunas de texto (não-numéricas) da base -- viram candidata também, mas
+  // sempre entram WOE-codificadas automaticamente no backend (não têm outro
+  // jeito de virar corte `<=`/`>` no extrator de regra), diferente das
+  // numéricas marcadas manualmente em `colunasCategoricasMarcadas` abaixo.
+  const colunasTextoBase = colunasBase.filter((c) => c !== colunaY && !colunasNumericasBase.includes(c));
+  const colunasParaEsfera2 =
+    fonteEsfera2 === "esfera1" ? (resultadoEsfera1?.colunas_geradas ?? []) : [...colunasNumericasBase, ...colunasTextoBase];
   // rodarDireto já usa o dev.csv/teste.csv que o usuário preparou na aba
   // Dataset do Pedro_Wise -- não faz sentido oferecer split de novo aqui.
   const usaRodarDireto = fonteEsfera2 === "bruta" && base?.tipo === "flat";
@@ -717,24 +805,66 @@ export default function FeatureLabPagina() {
                 </div>
 
                 <div className="mb-4">
-                  <p className="mb-1.5 text-[11px] text-slate-500">colunas candidatas</p>
+                  <p className="mb-1.5 text-[11px] text-slate-500">
+                    colunas candidatas{" "}
+                    {colunasTextoBase.length > 0 && fonteEsfera2 === "bruta" && (
+                      <span className="text-amber-500">
+                        (texto, borda tracejada, vira WOE automaticamente)
+                      </span>
+                    )}
+                  </p>
                   <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">
-                    {colunasParaEsfera2.map((c) => (
-                      <label
-                        key={c}
-                        className="flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={colunasX.has(c)}
-                          onChange={() => alternar(colunasX, c, setColunasX)}
-                          className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
-                        />
-                        {c}
-                      </label>
-                    ))}
+                    {colunasParaEsfera2.map((c) => {
+                      const ehTexto = fonteEsfera2 === "bruta" && colunasTextoBase.includes(c);
+                      return (
+                        <label
+                          key={c}
+                          title={ehTexto ? "coluna de texto -- WOE-codificada automaticamente" : undefined}
+                          className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${
+                            ehTexto
+                              ? "border-dashed border-amber-700 bg-amber-950/20 text-amber-200"
+                              : "border-slate-700 bg-slate-800/60 text-slate-300"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={colunasX.has(c)}
+                            onChange={() => alternar(colunasX, c, setColunasX)}
+                            className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+                          />
+                          {c}
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
+
+                {fonteEsfera2 === "bruta" && [...colunasX].some((c) => !colunasTextoBase.includes(c)) && (
+                  <div className="mb-4">
+                    <p className="mb-1.5 text-[11px] text-slate-500">
+                      tratar como categórica (WOE) — pra código numérico sem ordem real, ex.: um campo tipo
+                      &ldquo;Thallium&rdquo; onde 3/6/7 são categorias, não uma escala
+                    </p>
+                    <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto">
+                      {[...colunasX]
+                        .filter((c) => !colunasTextoBase.includes(c))
+                        .map((c) => (
+                          <label
+                            key={c}
+                            className="flex cursor-pointer items-center gap-1.5 rounded-full border border-amber-800 bg-amber-950/10 px-2.5 py-1 text-xs text-amber-200"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={colunasCategoricasMarcadas.has(c)}
+                              onChange={() => alternar(colunasCategoricasMarcadas, c, setColunasCategoricasMarcadas)}
+                              className="h-3.5 w-3.5 rounded border-amber-600 bg-slate-800 text-amber-500 focus:ring-amber-500"
+                            />
+                            {c}
+                          </label>
+                        ))}
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
                   <div>
@@ -956,7 +1086,23 @@ export default function FeatureLabPagina() {
                 </p>
 
                 <div className="mb-4">
-                  <p className="mb-1.5 text-[11px] text-slate-500">variáveis do modelo</p>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="text-[11px] text-slate-500">variáveis do modelo</p>
+                    <div className="flex gap-2 text-[11px]">
+                      <button
+                        onClick={() => setColunasX3(new Set(colunasParaEsfera2))}
+                        className="text-slate-400 underline-offset-2 hover:text-emerald-400 hover:underline"
+                      >
+                        selecionar todas
+                      </button>
+                      <button
+                        onClick={() => setColunasX3(new Set())}
+                        className="text-slate-400 underline-offset-2 hover:text-red-400 hover:underline"
+                      >
+                        limpar
+                      </button>
+                    </div>
+                  </div>
                   <div className="flex max-h-48 flex-wrap gap-2 overflow-y-auto">
                     {colunasParaEsfera2.map((c) => (
                       <label
@@ -975,14 +1121,125 @@ export default function FeatureLabPagina() {
                   </div>
                 </div>
 
-                <button
-                  onClick={aoRodarEsfera3}
-                  disabled={rodandoEsfera3}
-                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {rodandoEsfera3 ? "Rodando…" : "Rodar esfera 3"}
-                </button>
+                {resultado && resultado.regras.length > 0 && (
+                  <div className="mb-4">
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <p className="text-[11px] text-slate-500">
+                        regras de interação descobertas na esfera 2 (viram coluna 0/1)
+                      </p>
+                      <div className="flex gap-2 text-[11px]">
+                        <button
+                          onClick={() => setRegrasX3(new Set(resultado.regras.map((r) => r.regra)))}
+                          className="text-slate-400 underline-offset-2 hover:text-emerald-400 hover:underline"
+                        >
+                          selecionar todas
+                        </button>
+                        <button
+                          onClick={() => setRegrasX3(new Set())}
+                          className="text-slate-400 underline-offset-2 hover:text-red-400 hover:underline"
+                        >
+                          limpar
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex max-h-48 flex-wrap gap-2 overflow-y-auto">
+                      {resultado.regras.map((r) => (
+                        <label
+                          key={r.regra}
+                          title={`IV teste ${r.iv_teste.toFixed(3)}`}
+                          className="flex cursor-pointer items-center gap-1.5 rounded-full border border-violet-800 bg-violet-950/30 px-2.5 py-1 text-xs text-violet-200"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={regrasX3.has(r.regra)}
+                            onChange={() => alternar(regrasX3, r.regra, setRegrasX3)}
+                            className="h-3.5 w-3.5 rounded border-violet-600 bg-slate-800 text-violet-500 focus:ring-violet-500"
+                          />
+                          {r.regra}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={aoRodarEsfera3}
+                    disabled={rodandoEsfera3}
+                    className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {rodandoEsfera3 ? "Rodando…" : "Rodar esfera 3"}
+                  </button>
+                  <button
+                    onClick={aoRodarComparacao}
+                    disabled={rodandoComparacao}
+                    title="Roda a seleção stepwise real do Pedro_Wise com e sem as regras marcadas acima, pra comparar o KS do modelo final de cada lado"
+                    className="rounded-lg border border-violet-700 px-4 py-2 text-sm font-medium text-violet-300 transition hover:bg-violet-950/40 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {rodandoComparacao ? "Comparando…" : "Comparar com Pedro_Wise (com/sem regras)"}
+                  </button>
+                </div>
               </div>
+
+              {resultadoComparacao && (
+                <div className="mt-6 rounded-xl border border-violet-800 bg-violet-950/10 p-5">
+                  <h2 className="mb-1 text-xs font-semibold uppercase tracking-wider text-violet-300">
+                    Prova de valor: stepwise Pedro_Wise com vs. sem regras
+                  </h2>
+                  <p className="mb-4 text-xs text-slate-500">
+                    Mesmo motor de seleção automática (forward/backward, níveis 1/2/2.5) da aba principal,
+                    rodado duas vezes: uma só com as colunas base marcadas, outra com essas colunas + as
+                    regras marcadas também como candidata. Se o KS &ldquo;com regras&rdquo; não superar o
+                    &ldquo;sem regras&rdquo;, as regras não estão agregando valor nesse dataset.
+                  </p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {(
+                      [
+                        { rotulo: "sem regras", r: resultadoComparacao.sem_regras, cor: "text-slate-300" },
+                        { rotulo: "com regras", r: resultadoComparacao.com_regras, cor: "text-violet-300" },
+                      ] as const
+                    ).map(({ rotulo, r, cor }) => (
+                      <div key={rotulo} className="rounded-lg border border-slate-700 bg-slate-900/60 p-4">
+                        <p className={`mb-2 text-[11px] font-medium uppercase tracking-wider ${cor}`}>{rotulo}</p>
+                        <div className="mb-3 grid grid-cols-3 gap-2">
+                          <Metrica rotulo="KS teste" valor={r.ks_teste.toFixed(3)} />
+                          <Metrica rotulo="KS dev" valor={r.ks_dev.toFixed(3)} />
+                          <Metrica rotulo="AUC teste" valor={r.auc_teste.toFixed(3)} />
+                        </div>
+                        <p className="mb-1 text-[11px] text-slate-500">
+                          {r.n_variaveis} variável(is) selecionada(s)
+                        </p>
+                        <div className="flex flex-wrap gap-1">
+                          {r.variaveis.map((v) => (
+                            <span
+                              key={v}
+                              className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                                v.includes("_regra")
+                                  ? "border-violet-700 bg-violet-950/40 text-violet-200"
+                                  : "border-slate-700 bg-slate-800/60 text-slate-300"
+                              }`}
+                            >
+                              {v}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-4 text-sm">
+                    ΔKS teste (com − sem regras):{" "}
+                    <span
+                      className={`font-semibold tabular-nums ${
+                        resultadoComparacao.com_regras.ks_teste > resultadoComparacao.sem_regras.ks_teste
+                          ? "text-emerald-400"
+                          : "text-red-400"
+                      }`}
+                    >
+                      {(resultadoComparacao.com_regras.ks_teste - resultadoComparacao.sem_regras.ks_teste).toFixed(3)}
+                    </span>
+                  </p>
+                </div>
+              )}
 
               {resultadoEsfera3 && (
                 <div className="mt-6 rounded-xl border border-slate-700 bg-slate-900/70 p-5">
@@ -1002,11 +1259,11 @@ export default function FeatureLabPagina() {
                     />
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-4 lg:grid-cols-2">
                     <div>
                       <p className="mb-1.5 text-[11px] text-slate-500">coeficientes</p>
-                      <div className="max-h-72 overflow-y-auto rounded-lg border border-slate-700">
-                        <table className="w-full text-xs">
+                      <div className="max-h-[36rem] overflow-y-auto rounded-lg border border-slate-700">
+                        <table className="w-full text-sm">
                           <thead className="sticky top-0 bg-slate-800/90 text-slate-400">
                             <tr>
                               <th className="px-3 py-1.5 text-left font-medium">variável</th>
@@ -1020,15 +1277,15 @@ export default function FeatureLabPagina() {
                               const stats = resultadoEsfera3.estatisticas[nome];
                               return (
                                 <tr key={nome} className={i % 2 === 0 ? "bg-slate-900/40" : "bg-slate-900/70"}>
-                                  <td className="px-3 py-1 font-mono text-slate-300">{nome}</td>
-                                  <td className="px-3 py-1 text-right tabular-nums text-slate-300">
+                                  <td className="px-3 py-2 font-mono text-slate-300">{nome}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums text-slate-300">
                                     {coef.toFixed(4)}
                                   </td>
-                                  <td className="px-3 py-1 text-right tabular-nums text-slate-500">
+                                  <td className="px-3 py-2 text-right tabular-nums text-slate-500">
                                     {stats ? stats.erro_padrao.toFixed(4) : "—"}
                                   </td>
                                   <td
-                                    className={`px-3 py-1 text-right tabular-nums ${
+                                    className={`px-3 py-2 text-right tabular-nums ${
                                       stats && stats.p_valor < 0.05 ? "text-emerald-400" : "text-slate-500"
                                     }`}
                                   >

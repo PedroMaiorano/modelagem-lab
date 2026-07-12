@@ -2,6 +2,57 @@
 
 export const URL_API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
 
+// Espelha `logica.ConfigEsfera2`/`main.ConfigEsfera2API` -- roda entre
+// Construção e Categorização (ver `_rodar_esfera2` no backend pro
+// raciocínio de ordem: assim o GBM nunca vê transformações de potência
+// tipo log/raiz da mesma variável, que só existem a partir da
+// Categorização).
+export interface ConfigEsfera2 {
+  ativo: boolean;
+  colunas_categoricas?: string[] | null;
+  profundidade_maxima: number;
+  n_arvores: number;
+  min_suporte: number;
+  max_suporte: number;
+  max_regras: number;
+  permitir_cruzamento_entre_bases: boolean;
+  proporcao_variaveis_por_split?: number | null;
+  iv_minimo: number;
+}
+
+export const ESFERA2_PADRAO: ConfigEsfera2 = {
+  ativo: false,
+  colunas_categoricas: [],
+  profundidade_maxima: 2,
+  n_arvores: 60,
+  min_suporte: 0.02,
+  max_suporte: 0.5,
+  max_regras: 10,
+  permitir_cruzamento_entre_bases: true,
+  proporcao_variaveis_por_split: null,
+  iv_minimo: 0.02,
+};
+
+// Espelha `logica.ConfigEsfera1`/`main.ConfigEsfera1API` -- tratamento
+// opcional EM MEMÓRIA, roda logo após carregar o dataset, antes de tudo o
+// resto (Construção, Esfera 2, Categorização...). Nunca grava/sobrescreve
+// dataset -- mesmo padrão de ConfigEsfera2 (ver `_aplicar_esfera1`).
+export interface ConfigEsfera1 {
+  ativo: boolean;
+  chave: string;
+  coluna_tempo: string;
+  colunas_valor?: string[] | null;
+  janelas?: number[] | null;
+}
+
+export const ESFERA1_PADRAO: ConfigEsfera1 = {
+  ativo: false,
+  chave: "",
+  coluna_tempo: "",
+  colunas_valor: [],
+  janelas: [],
+};
+
 export interface ConfigPipeline {
   dataset: string;
   usar_pipeline_completo: boolean;
@@ -36,6 +87,10 @@ export interface ConfigPipeline {
   // Só relevante quando p_valor_maximo está ativo: roda a busca de novo sem
   // o filtro, pra comparação (dobra o tempo de treinamento).
   comparar_sem_p_valor: boolean;
+  // Esfera 2 (descoberta de interação) — opt-in, entre Construção e Categorização.
+  esfera2: ConfigEsfera2;
+  // Esfera 1 (agregação temporal) — opt-in, roda antes de tudo o resto.
+  esfera1: ConfigEsfera1;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,14 +190,39 @@ export interface ParConstrucao {
   operacao: "razao" | "diferenca";
 }
 
+export interface ResultadoEsfera1 {
+  colunas_novas: string[];
+  n_dev_antes: number;
+  n_teste_antes: number;
+  n_dev_depois: number;
+  n_teste_depois: number;
+}
+
+export async function rodarEsfera1(
+  dataset: string,
+  esfera1: ConfigEsfera1 = { ...ESFERA1_PADRAO, ativo: true },
+): Promise<ResultadoEsfera1> {
+  const resp = await fetch(`${URL_API}/api/modulo/esfera1`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dataset, esfera1 }),
+  });
+  if (!resp.ok) {
+    const corpo = await resp.json().catch(() => null);
+    throw new Error(corpo?.detail ?? `Falha ao rodar esfera 1 (${resp.status})`);
+  }
+  return resp.json();
+}
+
 export async function rodarConstrucao(
   dataset: string,
   paresCustomizados: ParConstrucao[] = [],
+  esfera1: ConfigEsfera1 = ESFERA1_PADRAO,
 ): Promise<ResultadoConstrucao> {
   const resp = await fetch(`${URL_API}/api/modulo/construcao`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dataset, pares_customizados: paresCustomizados }),
+    body: JSON.stringify({ dataset, pares_customizados: paresCustomizados, esfera1 }),
   });
   if (!resp.ok) throw new Error(`Falha ao rodar construção (${resp.status})`);
   return resp.json();
@@ -154,6 +234,8 @@ export async function rodarCategorizacaoTransformacao(
   paresCustomizados: ParConstrucao[] = [],
   gerarTransformacoesPotencia: boolean = true,
   gerarBinOrdinal: boolean = true,
+  esfera2: ConfigEsfera2 = ESFERA2_PADRAO,
+  esfera1: ConfigEsfera1 = ESFERA1_PADRAO,
 ): Promise<ResultadoCategorizacaoTransformacao> {
   const resp = await fetch(`${URL_API}/api/modulo/categorizacao-transformacao`, {
     method: "POST",
@@ -164,9 +246,41 @@ export async function rodarCategorizacaoTransformacao(
       pares_customizados: paresCustomizados,
       gerar_transformacoes_potencia: gerarTransformacoesPotencia,
       gerar_bin_ordinal: gerarBinOrdinal,
+      esfera2,
+      esfera1,
     }),
   });
   if (!resp.ok) throw new Error(`Falha ao rodar categorização + transformação (${resp.status})`);
+  return resp.json();
+}
+
+export interface ResultadoEsfera2 {
+  colunas_novas: string[];
+  n_regras_estaveis: number;
+}
+
+export async function rodarEsfera2(
+  dataset: string,
+  usarConstrucao: boolean,
+  paresCustomizados: ParConstrucao[] = [],
+  esfera2: ConfigEsfera2 = { ...ESFERA2_PADRAO, ativo: true },
+  esfera1: ConfigEsfera1 = ESFERA1_PADRAO,
+): Promise<ResultadoEsfera2> {
+  const resp = await fetch(`${URL_API}/api/modulo/esfera2`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dataset,
+      usar_construcao: usarConstrucao,
+      pares_customizados: paresCustomizados,
+      esfera2,
+      esfera1,
+    }),
+  });
+  if (!resp.ok) {
+    const corpo = await resp.json().catch(() => null);
+    throw new Error(corpo?.detail ?? `Falha ao rodar esfera 2 (${resp.status})`);
+  }
   return resp.json();
 }
 
@@ -179,6 +293,8 @@ export interface ConfigPreSelecao {
   limiar_variancia: number | null;
   limiar_iv: number | null;
   limiar_correlacao: number | null;
+  esfera2: ConfigEsfera2;
+  esfera1: ConfigEsfera1;
 }
 
 export interface ParCorrelacionado {
@@ -298,6 +414,7 @@ export interface ResumoColunaNumerica {
   maximo: number;
   media: number;
   desvio_padrao: number;
+  iv: number | null;
 }
 
 export interface ResumoColunaCategorica {
@@ -305,6 +422,7 @@ export interface ResumoColunaCategorica {
   pct_ausente: number;
   n_distintos: number;
   top_valores: { valor: string; contagem: number }[];
+  iv: number | null;
 }
 
 export type ResumoColuna = ResumoColunaNumerica | ResumoColunaCategorica;
@@ -430,6 +548,11 @@ export interface ParametrosEsfera2 {
   permitir_cruzamento_entre_bases: boolean;
   coluna_y: string;
   proporcao_variaveis_por_split?: number | null;
+  // colunas numéricas que o usuário marcou pra WOE-codificar antes da
+  // esfera 2 (ex.: código categórico sem ordem real, tipo Thallium no Heart
+  // Disease) -- colunas de texto entram nesse tratamento automaticamente no
+  // backend, não precisam estar aqui.
+  colunas_categoricas?: string[];
 }
 
 export interface ConfigDescobrir extends ParametrosEsfera2 {
@@ -446,6 +569,12 @@ export interface ConfigDireto extends ParametrosEsfera2 {
   colunas_x: string[];
 }
 
+export interface CondicaoRegra {
+  feature: string;
+  operador: "<=" | ">";
+  limiar: number;
+}
+
 export interface RegraFeatureLab {
   regra: string;
   n_condicoes: number;
@@ -454,6 +583,7 @@ export interface RegraFeatureLab {
   suporte_teste: number;
   iv_dev: number;
   iv_teste: number;
+  condicoes: CondicaoRegra[];
 }
 
 export interface ResultadoFeatureLab {
@@ -482,6 +612,12 @@ export interface ConfigRegressaoManual extends ConfigSplitFeatureLab {
   tabela: Record<string, unknown>[];
   colunas_x: string[];
   coluna_y: string;
+  // regras da esfera 2 (opcional) materializadas como coluna 0/1 e somadas
+  // a colunas_x -- split, WOE de categórica e materialização acontecem
+  // tudo dentro de uma única chamada no backend (ver rodar_regressao_manual),
+  // nunca em duas chamadas separadas com round-trip de tabela.
+  regras?: { condicoes: CondicaoRegra[] }[];
+  colunas_categoricas?: string[];
 }
 
 export interface EstatisticaCoeficiente {
@@ -619,6 +755,47 @@ export async function rodarRegressaoManual(
   if (!resp.ok) {
     const corpo = await resp.json().catch(() => null);
     throw new Error(corpo?.detail ?? `Falha ao rodar regressão (${resp.status})`);
+  }
+  return resp.json();
+}
+
+export interface ResultadoStepwisePedroWise {
+  variaveis: string[];
+  n_variaveis: number;
+  ks_dev: number;
+  ks_teste: number;
+  auc_teste: number;
+}
+
+export interface ResultadoComparacaoPedroWise {
+  sem_regras: ResultadoStepwisePedroWise;
+  com_regras: ResultadoStepwisePedroWise;
+  n_dev: number;
+  n_teste: number;
+}
+
+export interface ConfigCompararPedroWise extends ConfigSplitFeatureLab {
+  tabela: Record<string, unknown>[];
+  colunas_base: string[];
+  regras: { condicoes: CondicaoRegra[] }[];
+  coluna_y: string;
+  colunas_categoricas?: string[];
+}
+
+/** Prova de valor: roda a seleção stepwise real do Pedro_Wise (mesmo motor
+ * da aba principal) com e sem as regras da esfera 2 como candidatas, pra
+ * comparar o KS do modelo final que cada lado converge. */
+export async function compararComPedroWise(
+  config: ConfigCompararPedroWise,
+): Promise<ResultadoComparacaoPedroWise> {
+  const resp = await fetch(`${URL_API}/api/feature-lab/comparar-pedro-wise`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!resp.ok) {
+    const corpo = await resp.json().catch(() => null);
+    throw new Error(corpo?.detail ?? `Falha ao comparar com Pedro_Wise (${resp.status})`);
   }
   return resp.json();
 }

@@ -31,15 +31,21 @@ _RAIZ = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_RAIZ / "python"))
 
 import pandas as pd  # noqa: E402
-from agregacao_temporal import (  # noqa: E402
-    construir_agregados_janela,
-    extrair_base_agregado,
-    normalizar_safra,
-)
+import pipeline_lab.esfera1 as pipeline_lab_esfera1  # noqa: E402
+import pipeline_lab.esfera2 as pipeline_lab_esfera2  # noqa: E402
+from agregacao_temporal import extrair_base_agregado  # noqa: E402
 from categorizacao import aplicar_bins, bins_frequencia_igual  # noqa: E402
-from interacao import avaliar_estabilidade, extrair_candidatas  # noqa: E402
+from interacao import (  # noqa: E402
+    Condicao,
+    Regra,
+    avaliar_estabilidade,
+    extrair_candidatas,
+    regras_para_colunas,
+)
 from pedro_wise.estimators import LogisticGLM  # noqa: E402
 from pedro_wise.metrics import KSGaussianMetric  # noqa: E402
+from pedro_wise.pipeline import run_pedro_wise  # noqa: E402
+from pedro_wise.types import SelectionState  # noqa: E402
 from sklearn.metrics import roc_auc_score  # noqa: E402
 from transformacao.woe import ajustar_woe  # noqa: E402
 
@@ -178,6 +184,12 @@ def carregar_base_bruta(base: str, tipo: Literal["painel", "flat"], coluna_y: st
     return {"tabela": df.to_dict(orient="records"), "colunas": list(df.columns), "n_linhas": len(df)}
 
 
+#: Núcleo da esfera 1 mora em `pipeline_lab.esfera1` (biblioteca standalone,
+#: sem disco/FastAPI) -- alias aqui só pra não quebrar quem já importa
+#: `_agregar_df` deste módulo (ex.: `logica.py`).
+_agregar_df = pipeline_lab_esfera1.agregar
+
+
 def agregar_base(
     base: str,
     tipo: Literal["painel", "flat"],
@@ -187,41 +199,14 @@ def agregar_base(
     janelas: list[int],
     coluna_y: str = "y",
 ) -> dict[str, Any]:
-    """Esfera 1: roda `construir_agregados_janela` pra cada `colunas_valor` e
-    reduz a uma linha por chave (último período). Devolve a tabela pronta
-    (com `y` -- `coluna_y` renomeada internamente, o resto do código sempre
-    trabalha com o nome fixo), a lista de colunas geradas, e as contagens
-    brutas (pra resumo na interface). Funciona em cima de painel OU dataset
-    flat -- a escolha de chave/tempo/resposta é do usuário, não uma trava
-    por tipo de base.
+    """Esfera 1 sobre uma base já salva (painel ou dataset flat do
+    feature-lab). Devolve a tabela pronta (com `y` -- `coluna_y` renomeada
+    internamente, o resto do código sempre trabalha com o nome fixo), a
+    lista de colunas geradas, e as contagens brutas (pra resumo na
+    interface). Ver `_agregar_df` pro núcleo da agregação em si.
     """
-    if not colunas_valor:
-        raise ValueError("Selecione ao menos uma coluna de valor pra agregar")
-
     df, caminho_alvo = _carregar_tabela_base(base, tipo)
-    if chave not in df.columns or coluna_tempo not in df.columns:
-        raise ValueError(f"Colunas de chave/tempo inválidas pra '{base}'")
-
-    # normalizar_safra espera formato de data/safra (a razão de existir é
-    # unificar "202401"/"2024-01"/"2024-01-15" misturados) -- forçar isso
-    # numa coluna de tempo já numérica (comum quando a "esfera 1" é aplicada
-    # numa base flat qualquer, não um painel de verdade com safra) rejeitava
-    # a coluna sem necessidade. Só normaliza quando não é numérica.
-    if pd.api.types.is_numeric_dtype(df[coluna_tempo]):
-        df["_tempo_norm"] = df[coluna_tempo]
-    else:
-        df["_tempo_norm"] = normalizar_safra(df[coluna_tempo])
-    df = df.sort_values([chave, "_tempo_norm"]).reset_index(drop=True)
-
-    agregado = df
-    colunas_geradas: list[str] = []
-    for valor in colunas_valor:
-        agregado = construir_agregados_janela(
-            agregado, chave=chave, tempo="_tempo_norm", valor=valor, janelas=janelas
-        )
-        colunas_geradas += [c for c in agregado.columns if c.startswith(f"{valor}_")]
-
-    por_chave = agregado.groupby(chave, sort=False).tail(1).reset_index(drop=True)
+    por_chave, colunas_geradas = _agregar_df(df, chave, coluna_tempo, colunas_valor, janelas)
 
     if coluna_y in por_chave.columns:
         if coluna_y != "y":
@@ -262,9 +247,41 @@ def _empacotar_regras(regras: list[Any], tabela: pd.DataFrame) -> list[dict[str,
                 "suporte_teste": float(linha["suporte_teste"]),
                 "iv_dev": float(linha["iv_dev"]),
                 "iv_teste": float(linha["iv_teste"]),
+                # condições brutas -- a interface manda de volta quando o
+                # usuário quer usar uma regra descoberta na esfera 2 como
+                # variável da esfera 3 (ver `_materializar_regras_em`).
+                "condicoes": [
+                    {"feature": c.feature, "operador": c.operador, "limiar": c.limiar}
+                    for c in regra.condicoes
+                ],
             }
         )
     return linhas
+
+
+def _materializar_regras_em(
+    dev: pd.DataFrame, teste: pd.DataFrame, regras: list[dict[str, Any]]
+) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    """Materializa regras da esfera 2 (selecionadas pelo usuário) como
+    colunas 0/1 em dev/teste JÁ separados -- reaproveita
+    `regras_para_colunas`/`Regra.aplicar` (nunca reimplementa a avaliação de
+    condição). Aplicado depois do split (não antes, e não devolvido pro
+    cliente pra ser reenviado/re-splitado depois): se uma regra referenciar
+    uma coluna categórica WOE-codificada (ex.: `Thallium_woe`), essa coluna só
+    existe depois do split+WOE, e um round-trip cliente-servidor com re-split
+    correria risco de embaralhar as linhas de outro jeito e produzir um dev/
+    teste diferente do que gerou a regra."""
+    if not regras:
+        return dev, teste, []
+    objetos = [
+        Regra(tuple(Condicao(c["feature"], c["operador"], c["limiar"]) for c in r["condicoes"]))
+        for r in regras
+    ]
+    colunas_regra_dev = regras_para_colunas(objetos, dev)
+    colunas_regra_teste = regras_para_colunas(objetos, teste)
+    dev = pd.concat([dev, colunas_regra_dev], axis=1)
+    teste = pd.concat([teste, colunas_regra_teste], axis=1)
+    return dev, teste, list(colunas_regra_dev.columns)
 
 
 def _iv_univariado(df: pd.DataFrame, colunas: list[str], y: pd.Series) -> dict[str, float]:
@@ -392,6 +409,12 @@ def _dividir_dev_teste(
     return dividir_aleatorio(df, proporcao_teste=0.5, semente=semente)
 
 
+#: Núcleo mora em `pipeline_lab.esfera2` -- alias aqui só pra não quebrar
+#: quem já importa `_transformar_categoricas_woe` deste módulo (`logica.py`,
+#: `test_feature_lab.py`).
+_transformar_categoricas_woe = pipeline_lab_esfera2.transformar_categoricas_woe
+
+
 def descobrir_em_tabela(
     registros: list[dict[str, Any]],
     colunas_x: list[str],
@@ -408,11 +431,14 @@ def descobrir_em_tabela(
     coluna_split: str | None = None,
     valores_dev: list[str] | None = None,
     valores_teste: list[str] | None = None,
+    colunas_categoricas: list[str] | None = None,
 ) -> dict[str, Any]:
     """Esfera 2 sobre uma tabela já em mãos (tipicamente a saída de
     `rodar_agregacao`) -- reconstrói o DataFrame, faz o split dev/teste
     (aleatório por padrão, ou por uma coluna de amostra já existente na
-    base) e roda `_descobrir`."""
+    base) e roda `_descobrir`. `colunas_categoricas`: subconjunto de
+    `colunas_x` pra WOE-codificar antes (ver `_transformar_categoricas_woe`)
+    -- colunas de texto entram nesse tratamento automaticamente."""
     if not colunas_x:
         raise ValueError("Selecione ao menos uma coluna candidata")
     if coluna_y not in (registros[0] if registros else {}):
@@ -422,6 +448,7 @@ def descobrir_em_tabela(
     if coluna_y != "y":
         df = df.rename(columns={coluna_y: "y"})
     dev, teste = _dividir_dev_teste(df, metodo_split, semente, coluna_split, valores_dev, valores_teste)
+    dev, teste, colunas_x = _transformar_categoricas_woe(dev, teste, colunas_x, colunas_categoricas or [])
 
     return _descobrir(
         dev[colunas_x],
@@ -450,6 +477,7 @@ def rodar_direto(
     permitir_cruzamento_entre_bases: bool = True,
     coluna_y: str = "y",
     proporcao_variaveis_por_split: float | None = None,
+    colunas_categoricas: list[str] | None = None,
 ) -> dict[str, Any]:
     """Modo direto: pula a esfera 1 -- usa um dataset já flat (mesmo
     dev.csv/teste.csv do Pedro_Wise, já com split dev/teste pronto) direto
@@ -466,6 +494,9 @@ def rodar_direto(
     if coluna_y != "y":
         df_dev = df_dev.rename(columns={coluna_y: "y"})
         df_teste = df_teste.rename(columns={coluna_y: "y"})
+    df_dev, df_teste, colunas_x = _transformar_categoricas_woe(
+        df_dev, df_teste, colunas_x, colunas_categoricas or []
+    )
 
     return _descobrir(
         df_dev[colunas_x],
@@ -491,13 +522,19 @@ def rodar_regressao_manual(
     valores_dev: list[str] | None = None,
     valores_teste: list[str] | None = None,
     semente: int = 0,
+    regras: list[dict[str, Any]] | None = None,
+    colunas_categoricas: list[str] | None = None,
 ) -> dict[str, Any]:
     """Esfera 3: monta uma regressão logística com as variáveis que o
     usuário escolher (agregadas, brutas, ou qualquer coluna disponível),
     ajustada via o mesmo `LogisticGLM`/`KSGaussianMetric` que o Pedro_Wise
     usa -- núcleo nunca reimplementado, só reaproveitado aqui pra um
-    ajuste manual em vez da busca automática."""
-    if not colunas_x:
+    ajuste manual em vez da busca automática. `regras`: regras da esfera 2
+    (opcional) materializadas como coluna 0/1 e somadas a `colunas_x` --
+    split, WOE de categórica e materialização de regra acontecem todos
+    aqui dentro, numa única chamada, pra nunca correr risco de um dev/teste
+    diferente do que gerou a regra (ver `_materializar_regras_em`)."""
+    if not colunas_x and not regras:
         raise ValueError("Selecione ao menos uma coluna")
     if coluna_y not in (registros[0] if registros else {}):
         raise ValueError(f"Tabela sem coluna '{coluna_y}'")
@@ -506,6 +543,9 @@ def rodar_regressao_manual(
     if coluna_y != "y":
         df = df.rename(columns={coluna_y: "y"})
     dev, teste = _dividir_dev_teste(df, metodo_split, semente, coluna_split, valores_dev, valores_teste)
+    dev, teste, colunas_x = _transformar_categoricas_woe(dev, teste, colunas_x, colunas_categoricas or [])
+    dev, teste, colunas_regra = _materializar_regras_em(dev, teste, regras or [])
+    colunas_x = [*colunas_x, *colunas_regra]
 
     X_dev, y_dev = dev[colunas_x], dev["y"]
     X_teste, y_teste = teste[colunas_x], teste["y"]
@@ -530,4 +570,89 @@ def rodar_regressao_manual(
         "taxa_evento_dev": float(y_dev.mean()),
         "taxa_evento_teste": float(y_teste.mean()),
         "tabela_decis": _tabela_decis(y_teste, prob_teste),
+    }
+
+
+def _rodar_stepwise_pedro_wise(dev: pd.DataFrame, teste: pd.DataFrame, colunas: list[str]) -> dict[str, Any]:
+    """Roda a seleção stepwise de verdade do Pedro_Wise (nível 1/2/2.5, mesmo
+    `run_pedro_wise` que a aba principal usa) restrita a `colunas` como
+    candidatas -- nenhuma lógica de seleção reimplementada aqui, só
+    reaproveitada com um subconjunto de colunas diferente a cada chamada."""
+    d, t = dev[[*colunas, "y"]], teste[[*colunas, "y"]]
+    estimator = LogisticGLM()
+    metric = KSGaussianMetric(criterio="teste")
+    modelo_nulo = estimator.fit(d[[]], d["y"])
+    score_nulo = metric(modelo_nulo, d[[]], d["y"], t[[]], t["y"])
+    estado_inicial = SelectionState(variables=(), model=modelo_nulo, score=score_nulo)
+    estado_final, _ = run_pedro_wise(estimator, metric, d, t, estado_inicial)
+
+    variaveis = list(estado_final.variables)
+    if variaveis:
+        ks_teste = metric(estado_final.model, d[variaveis], d["y"], t[variaveis], t["y"])
+        metric_dev = KSGaussianMetric(criterio="dev")
+        ks_dev = metric_dev(estado_final.model, d[variaveis], d["y"], t[variaveis], t["y"])
+        prob_teste = estado_final.model.predict_proba(t[variaveis])
+        auc_teste = float(roc_auc_score(t["y"], prob_teste))
+    else:
+        ks_teste, ks_dev, auc_teste = 0.0, 0.0, 0.5
+
+    return {
+        "variaveis": variaveis,
+        "n_variaveis": len(variaveis),
+        "ks_dev": ks_dev,
+        "ks_teste": ks_teste,
+        "auc_teste": auc_teste,
+    }
+
+
+def comparar_com_pedro_wise(
+    registros: list[dict[str, Any]],
+    colunas_base: list[str],
+    regras: list[dict[str, Any]],
+    coluna_y: str = "y",
+    metodo_split: Literal["aleatorio", "coluna"] = "aleatorio",
+    coluna_split: str | None = None,
+    valores_dev: list[str] | None = None,
+    valores_teste: list[str] | None = None,
+    semente: int = 0,
+    colunas_categoricas: list[str] | None = None,
+) -> dict[str, Any]:
+    """Prova de valor das regras da esfera 2: roda a seleção stepwise real do
+    Pedro_Wise duas vezes -- uma só com `colunas_base` como candidatas, outra
+    com `colunas_base` + as regras (materializadas como coluna 0/1) também
+    candidatas -- e devolve o KS/AUC de cada modelo final encontrado. Se o
+    KS "com regras" não superar o "sem regras", as regras não estão
+    agregando valor de verdade pra esse dataset (não é só uma opinião —
+    é o mesmo critério de seleção usado na aba principal julgando).
+    `colunas_categoricas`: mesmo tratamento WOE de `descobrir_em_tabela` --
+    precisa ser aplicado aqui de novo (split + fit WOE só no dev) antes de
+    materializar uma regra que referencie uma coluna categórica (ex.:
+    `Thallium_woe`), senão essa coluna não existe na tabela pra avaliar a
+    condição da regra."""
+    if not colunas_base:
+        raise ValueError("Selecione ao menos uma coluna base")
+
+    df = pd.DataFrame.from_records(registros)
+    if coluna_y not in df.columns:
+        raise ValueError(f"Tabela sem coluna '{coluna_y}'")
+    if coluna_y != "y":
+        df = df.rename(columns={coluna_y: "y"})
+
+    dev, teste = _dividir_dev_teste(df, metodo_split, semente, coluna_split, valores_dev, valores_teste)
+    dev, teste, colunas_base = _transformar_categoricas_woe(
+        dev, teste, colunas_base, colunas_categoricas or []
+    )
+    dev, teste, colunas_regra = _materializar_regras_em(dev, teste, regras)
+
+    sem_regras = _rodar_stepwise_pedro_wise(dev, teste, colunas_base)
+    if colunas_regra:
+        com_regras = _rodar_stepwise_pedro_wise(dev, teste, [*colunas_base, *colunas_regra])
+    else:
+        com_regras = sem_regras
+
+    return {
+        "sem_regras": sem_regras,
+        "com_regras": com_regras,
+        "n_dev": len(dev),
+        "n_teste": len(teste),
     }

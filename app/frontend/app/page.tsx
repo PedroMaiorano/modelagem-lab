@@ -15,6 +15,8 @@ import PainelResultado from "./components/PainelResultado";
 import { interpretarProgresso } from "./lib/progresso";
 import {
   buscarDatasets,
+  ESFERA1_PADRAO,
+  ESFERA2_PADRAO,
   rodarPipelineComProgresso,
   type ConfigPipeline,
   type EventoResultado,
@@ -47,6 +49,8 @@ const CONFIG_INICIAL: ConfigPipeline = {
   limiar_correlacao: 0.7,
   p_valor_maximo: null,
   comparar_sem_p_valor: true,
+  esfera2: ESFERA2_PADRAO,
+  esfera1: ESFERA1_PADRAO,
 };
 
 const ABAS = [

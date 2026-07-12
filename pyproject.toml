@@ -1,3 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modelagem-lab"
+version = "0.1.0"
+description = "Núcleo de modelagem de risco de crédito -- agregação temporal, descoberta de interação (RuleFit-style), categorização/WOE, pré-seleção e Pedro_Wise (seleção stepwise). Ver pipeline_lab pra montar o funil completo em cima de um DataFrame."
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.26",
+    "scikit-learn>=1.4",
+    "statsmodels>=0.14",
+    "scipy>=1.11",
+]
+
+# Todo o código-núcleo mora em python/{agregacao_temporal,categorizacao,...} --
+# cada pasta lá já é um pacote top-level (import "from pedro_wise import ..."
+# em todo o repo, não "from python.pedro_wise"). package-dir mapeia "" (raiz
+# do pacote) pra python/, então o pip instala cada uma dessas pastas como
+# pacote top-level de verdade, sem precisar renomear nenhum import existente.
+[tool.setuptools]
+package-dir = { "" = "python" }
+packages = [
+    "agregacao_temporal",
+    "categorizacao",
+    "construcao",
+    "interacao",
+    "pedro_wise",
+    "pipeline_lab",
+    "preselecao",
+    "transformacao",
+]
+
 [tool.ruff]
 line-length = 110
 target-version = "py311"

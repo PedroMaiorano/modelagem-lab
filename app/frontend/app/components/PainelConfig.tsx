@@ -1,6 +1,7 @@
 "use client";
 
-import type { ConfigPipeline } from "../lib/api";
+import { useEffect, useState } from "react";
+import { buscarPreviewDataset, type ConfigPipeline } from "../lib/api";
 
 interface Props {
   config: ConfigPipeline;
@@ -67,12 +68,144 @@ function CampoLimiarOpcional({
 }
 
 export default function PainelConfig({ config, aoMudar, rodando }: Props) {
+  const [colunas, setColunas] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!config.dataset) return;
+    buscarPreviewDataset(config.dataset)
+      .then((p) => setColunas(p.colunas.filter((c) => c !== "y")))
+      .catch(() => setColunas([]));
+  }, [config.dataset]);
+
   function atualizar<K extends keyof ConfigPipeline>(campo: K, valor: ConfigPipeline[K]) {
     aoMudar({ ...config, [campo]: valor });
   }
 
+  function atualizarEsfera1<K extends keyof ConfigPipeline["esfera1"]>(
+    campo: K,
+    valor: ConfigPipeline["esfera1"][K],
+  ) {
+    aoMudar({ ...config, esfera1: { ...config.esfera1, [campo]: valor } });
+  }
+
+  function atualizarEsfera2<K extends keyof ConfigPipeline["esfera2"]>(
+    campo: K,
+    valor: ConfigPipeline["esfera2"][K],
+  ) {
+    aoMudar({ ...config, esfera2: { ...config.esfera2, [campo]: valor } });
+  }
+
   return (
     <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+      <Secao titulo="Esfera 1 (agregação temporal)">
+        <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={config.esfera1.ativo}
+            onChange={(e) => atualizarEsfera1("ativo", e.target.checked)}
+            disabled={rodando}
+            className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+          />
+          Reduzir a uma linha por chave antes de tudo o resto
+        </label>
+        <p className="mt-1 mb-3 text-xs text-slate-500">
+          Dev e teste são agregados separadamente — preserva o split que você já escolheu no upload. Ver
+          aba Módulos pra inspecionar antes de ativar aqui.
+        </p>
+        <div className={`flex flex-col gap-3 ${config.esfera1.ativo ? "" : "opacity-40"}`}>
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-500">chave</label>
+            <select
+              value={config.esfera1.chave}
+              onChange={(e) => atualizarEsfera1("chave", e.target.value)}
+              disabled={rodando || !config.esfera1.ativo}
+              className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="">selecione…</option>
+              {colunas.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-500">coluna tempo</label>
+            <select
+              value={config.esfera1.coluna_tempo}
+              onChange={(e) => atualizarEsfera1("coluna_tempo", e.target.value)}
+              disabled={rodando || !config.esfera1.ativo}
+              className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="">selecione…</option>
+              {colunas.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-500">colunas de valor</label>
+            <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+              {colunas
+                .filter((c) => c !== config.esfera1.chave && c !== config.esfera1.coluna_tempo)
+                .map((c) => {
+                  const marcada = (config.esfera1.colunas_valor ?? []).includes(c);
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      disabled={rodando || !config.esfera1.ativo}
+                      onClick={() => {
+                        const atual = new Set(config.esfera1.colunas_valor ?? []);
+                        if (atual.has(c)) atual.delete(c);
+                        else atual.add(c);
+                        atualizarEsfera1("colunas_valor", [...atual]);
+                      }}
+                      className={`rounded-full border px-2 py-0.5 text-[11px] transition disabled:cursor-not-allowed ${
+                        marcada
+                          ? "border-sky-700 bg-sky-950/40 text-sky-300"
+                          : "border-slate-700 bg-slate-800/60 text-slate-400"
+                      }`}
+                    >
+                      {c}
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-500">janelas</label>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[2, 3, 6, 9, 12].map((j) => {
+                const marcada = (config.esfera1.janelas ?? []).includes(j);
+                return (
+                  <button
+                    key={j}
+                    type="button"
+                    disabled={rodando || !config.esfera1.ativo}
+                    onClick={() => {
+                      const atual = new Set(config.esfera1.janelas ?? []);
+                      if (atual.has(j)) atual.delete(j);
+                      else atual.add(j);
+                      atualizarEsfera1("janelas", [...atual].sort((a, b) => a - b));
+                    }}
+                    className={`rounded-full border px-2.5 py-1 text-xs transition disabled:cursor-not-allowed ${
+                      marcada
+                        ? "border-emerald-600 bg-emerald-950/40 text-emerald-300"
+                        : "border-slate-700 bg-slate-800/60 text-slate-400"
+                    }`}
+                  >
+                    {j}m
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </Secao>
+
       <Secao titulo="Pipeline">
         <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
           <input
@@ -116,8 +249,138 @@ export default function PainelConfig({ config, aoMudar, rodando }: Props) {
           Versão mais &ldquo;clássica&rdquo;/explicável (faixa em vez de WOE) — mesmo mecanismo de troca
           simples.
         </p>
+      </Secao>
 
-        <div className="mt-4">
+      <Secao titulo="Esfera 2 (interação)">
+        <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={config.esfera2.ativo}
+            onChange={(e) => atualizarEsfera2("ativo", e.target.checked)}
+            disabled={rodando || !config.usar_pipeline_completo}
+            className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+          />
+          Descobrir regras de interação (RuleFit-style)
+        </label>
+        <p className="mt-1 mb-3 text-xs text-slate-500">
+          Roda entre Construção e Categorização: treina um ensemble raso, extrai regras (&ldquo;A &gt; x E
+          B &gt; y&rdquo;) e as materializa como coluna 0/1, candidatas junto com o resto. Ver aba Módulos
+          pra inspecionar as regras encontradas antes de ativar aqui.
+        </p>
+        <div className={`grid grid-cols-2 gap-3 ${config.esfera2.ativo ? "" : "opacity-40"}`}>
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-500">nº árvores</label>
+            <input
+              type="number"
+              min={10}
+              max={300}
+              value={config.esfera2.n_arvores}
+              onChange={(e) => atualizarEsfera2("n_arvores", Number(e.target.value))}
+              disabled={rodando || !config.esfera2.ativo}
+              className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-500">profundidade máxima</label>
+            <input
+              type="number"
+              min={2}
+              max={6}
+              value={config.esfera2.profundidade_maxima}
+              onChange={(e) => atualizarEsfera2("profundidade_maxima", Number(e.target.value))}
+              disabled={rodando || !config.esfera2.ativo}
+              className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-500">máx. regras</label>
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={config.esfera2.max_regras}
+              onChange={(e) => atualizarEsfera2("max_regras", Number(e.target.value))}
+              disabled={rodando || !config.esfera2.ativo}
+              className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-500">IV mínimo (estabilidade)</label>
+            <input
+              type="number"
+              min={0}
+              step={0.01}
+              value={config.esfera2.iv_minimo}
+              onChange={(e) => atualizarEsfera2("iv_minimo", Number(e.target.value))}
+              disabled={rodando || !config.esfera2.ativo}
+              className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+        </div>
+        <label className="mt-3 flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={config.esfera2.permitir_cruzamento_entre_bases}
+            onChange={(e) => atualizarEsfera2("permitir_cruzamento_entre_bases", e.target.checked)}
+            disabled={rodando || !config.esfera2.ativo}
+            className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+          />
+          Permitir cruzar variáveis diferentes numa mesma regra
+        </label>
+      </Secao>
+
+      <Secao titulo="Pré-seleção (módulo 3)">
+        <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={config.usar_pre_selecao}
+            onChange={(e) => atualizar("usar_pre_selecao", e.target.checked)}
+            disabled={rodando || !config.usar_pipeline_completo}
+            className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+          />
+          Reduzir candidatas antes do treinamento
+        </label>
+        <p className="mt-1 mb-3 text-xs text-slate-500">
+          Aplica os filtros abaixo em sequência — cada um opcional. Ver aba Módulos pra inspecionar o funil
+          antes de rodar tudo.
+        </p>
+        <div className={`flex flex-col gap-3 ${config.usar_pre_selecao ? "" : "opacity-40"}`}>
+          <CampoLimiarOpcional
+            rotulo="variância mínima"
+            descricao="descarta colunas quase constantes"
+            valor={config.limiar_variancia}
+            aoMudar={(v) => atualizar("limiar_variancia", v)}
+            padrao={1e-6}
+            passo={0.000001}
+            disabled={rodando || !config.usar_pre_selecao}
+          />
+          <CampoLimiarOpcional
+            rotulo="IV mínimo"
+            descricao="descarta a variável-base inteira (todas as versões) abaixo disto"
+            valor={config.limiar_iv}
+            aoMudar={(v) => atualizar("limiar_iv", v)}
+            padrao={0.02}
+            passo={0.01}
+            disabled={rodando || !config.usar_pre_selecao}
+          />
+          <CampoLimiarOpcional
+            rotulo="correlação máxima entre bases"
+            descricao="entre pares muito correlacionados (bases diferentes), mantém o de maior IV"
+            valor={config.limiar_correlacao}
+            aoMudar={(v) => atualizar("limiar_correlacao", v)}
+            padrao={0.7}
+            passo={0.05}
+            disabled={rodando || !config.usar_pre_selecao}
+          />
+        </div>
+      </Secao>
+
+      <Secao titulo="Critério de seleção (Pedro_Wise)">
+        <p className="mb-3 text-xs text-slate-500">
+          Não é um detalhe do pipeline — é o objetivo que o forward/backward otimiza em toda a busca
+          (níveis 1 a 3): a cada passo, a variável só entra/sai se melhorar este KS.
+        </p>
+        <div>
           <span className="mb-2 block text-xs text-slate-500">Critério de parada</span>
           <div className="flex flex-col gap-1.5">
             {(["teste", "dev", "min"] as const).map((opcao) => (
@@ -270,52 +533,6 @@ export default function PainelConfig({ config, aoMudar, rodando }: Props) {
             </div>
           </div>
         )}
-      </Secao>
-
-      <Secao titulo="Pré-seleção (módulo 3)">
-        <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={config.usar_pre_selecao}
-            onChange={(e) => atualizar("usar_pre_selecao", e.target.checked)}
-            disabled={rodando || !config.usar_pipeline_completo}
-            className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
-          />
-          Reduzir candidatas antes do treinamento
-        </label>
-        <p className="mt-1 mb-3 text-xs text-slate-500">
-          Aplica os filtros abaixo em sequência — cada um opcional. Ver aba Módulos pra inspecionar o funil
-          antes de rodar tudo.
-        </p>
-        <div className={`flex flex-col gap-3 ${config.usar_pre_selecao ? "" : "opacity-40"}`}>
-          <CampoLimiarOpcional
-            rotulo="variância mínima"
-            descricao="descarta colunas quase constantes"
-            valor={config.limiar_variancia}
-            aoMudar={(v) => atualizar("limiar_variancia", v)}
-            padrao={1e-6}
-            passo={0.000001}
-            disabled={rodando || !config.usar_pre_selecao}
-          />
-          <CampoLimiarOpcional
-            rotulo="IV mínimo"
-            descricao="descarta a variável-base inteira (todas as versões) abaixo disto"
-            valor={config.limiar_iv}
-            aoMudar={(v) => atualizar("limiar_iv", v)}
-            padrao={0.02}
-            passo={0.01}
-            disabled={rodando || !config.usar_pre_selecao}
-          />
-          <CampoLimiarOpcional
-            rotulo="correlação máxima entre bases"
-            descricao="entre pares muito correlacionados (bases diferentes), mantém o de maior IV"
-            valor={config.limiar_correlacao}
-            aoMudar={(v) => atualizar("limiar_correlacao", v)}
-            padrao={0.7}
-            passo={0.05}
-            disabled={rodando || !config.usar_pre_selecao}
-          />
-        </div>
       </Secao>
 
       <Secao titulo="Significância">

@@ -25,6 +25,9 @@ sys.path.insert(0, str(_RAIZ / "python"))
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
+import pipeline_lab.categorizar as pipeline_lab_categorizar  # noqa: E402
+import pipeline_lab.esfera1 as pipeline_lab_esfera1  # noqa: E402
+import pipeline_lab.esfera2 as pipeline_lab_esfera2  # noqa: E402
 from categorizacao import aplicar_bins, bins_monotonicos  # noqa: E402
 from construcao import construir_diferenca, construir_razao  # noqa: E402
 from pedro_wise.estimators import LogisticGLM  # noqa: E402
@@ -40,7 +43,7 @@ from pedro_wise.types import (  # noqa: E402
 )
 from preselecao import pre_selecionar  # noqa: E402
 from sklearn.metrics import roc_auc_score  # noqa: E402
-from transformacao import ajustar_woe, aplicar_woe, classificar_iv, gerar_transformacoes_fixas  # noqa: E402
+from transformacao import ajustar_woe, classificar_iv  # noqa: E402
 
 DIR_DADOS = _RAIZ / "data"
 
@@ -57,6 +60,48 @@ class ParConstrucao(NamedTuple):
     denominador: str
     nome: str
     operacao: Literal["razao", "diferenca"] = "razao"
+
+
+class ConfigEsfera1(NamedTuple):
+    """Esfera 1 (agregação temporal) -- roda logo após `carregar_dataset`,
+    antes de tudo o resto (Construção, Esfera 2, Categorização...), ver
+    `_aplicar_esfera1`. Tratamento em memória só, nunca grava/sobrescreve
+    dataset -- exatamente o mesmo padrão de `ConfigEsfera2`."""
+
+    ativo: bool = False
+    chave: str = ""
+    coluna_tempo: str = ""
+    colunas_valor: list[str] | None = None
+    janelas: list[int] | None = None
+
+
+class ConfigEsfera2(NamedTuple):
+    """Esfera 2 (descoberta de interação) -- roda entre Construção e
+    Categorização, ver `_rodar_esfera2`. Agrupada num NamedTuple só (em vez
+    de ~9 kwargs soltos) porque precisa atravessar 4 funções diferentes
+    (`_construir_e_esfera2`, `rodar_categorizacao_transformacao`,
+    `rodar_pre_selecao`, `rodar_pipeline`) sem repetir a assinatura toda em
+    cada uma."""
+
+    ativo: bool = False
+    colunas_categoricas: list[str] | None = None
+    profundidade_maxima: int = 2
+    n_arvores: int = 60
+    min_suporte: float = 0.02
+    max_suporte: float = 0.5
+    max_regras: int = 10
+    permitir_cruzamento_entre_bases: bool = True
+    proporcao_variaveis_por_split: float | None = None
+    iv_minimo: float = 0.02
+
+
+#: NamedTuple é imutável -- seguro como default, mas ruff (B008) não sabe
+#: disso e recusa `= ConfigEsfera2()` direto na assinatura. Singleton
+#: módulo-level em vez de `None` + resolução: evita repetir esse padrão em
+#: 6 funções diferentes.
+_ESFERA2_DESLIGADA = ConfigEsfera2()
+_ESFERA2_ATIVA = ConfigEsfera2(ativo=True)
+_ESFERA1_DESLIGADA = ConfigEsfera1()
 
 
 class CapturadorProgresso(logging.Handler):
@@ -112,10 +157,44 @@ def _resumo_coluna(serie: pd.Series) -> dict[str, Any]:
     }
 
 
+def _iv_univariado_preview(df_dev: pd.DataFrame, colunas: list[str], y: pd.Series) -> dict[str, float]:
+    """IV de cada coluna sozinha (sem gerar candidata nenhuma) -- pro
+    preview do dataset (aba Dataset) mostrar poder preditivo bruto antes de
+    qualquer construção/categorização de verdade. Mesma decisão numérica vs.
+    categórica de `_categorizar_e_transformar` (binning monotônico só faz
+    sentido pra contínua com >2 valores; binária/categórica usa o valor cru
+    como bin) -- reaproveitada aqui pra não divergir do que o módulo 2
+    realmente vai calcular depois."""
+    resultado: dict[str, float] = {}
+    for coluna in colunas:
+        try:
+            eh_numerica = (
+                pd.api.types.is_numeric_dtype(df_dev[coluna]) and df_dev[coluna].nunique(dropna=True) > 2
+            )
+            if eh_numerica:
+                resultado_bin = bins_monotonicos(df_dev[coluna], y, n_bins_inicial=15)
+                if len(resultado_bin.edges) < 3:
+                    resultado[coluna] = 0.0
+                    continue
+                bin_idx = aplicar_bins(df_dev[coluna], resultado_bin.edges)
+            else:
+                bin_idx = df_dev[coluna]
+            resultado[coluna] = ajustar_woe(bin_idx, y).iv_total
+        except (ValueError, IndexError, TypeError):
+            resultado[coluna] = 0.0
+    return resultado
+
+
 def preview_dataset(nome: str, n: int = 5) -> dict[str, Any]:
     df_dev, df_teste = carregar_dataset(nome)
     colunas_numericas = [c for c in df_dev.columns if c != "y" and pd.api.types.is_numeric_dtype(df_dev[c])]
-    resumo_colunas = {c: _resumo_coluna(df_dev[c]) for c in df_dev.columns if c != "y"}
+    colunas_sem_y = [c for c in df_dev.columns if c != "y"]
+    iv_por_coluna = (
+        _iv_univariado_preview(df_dev, colunas_sem_y, df_dev["y"]) if "y" in df_dev.columns else {}
+    )
+    resumo_colunas = {
+        c: {**_resumo_coluna(df_dev[c]), "iv": iv_por_coluna.get(c)} for c in colunas_sem_y
+    }
     return {
         "colunas": list(df_dev.columns),
         "colunas_numericas": colunas_numericas,
@@ -126,6 +205,47 @@ def preview_dataset(nome: str, n: int = 5) -> dict[str, Any]:
         "resumo_colunas": resumo_colunas,
         "amostra": df_dev.head(n).to_dict(orient="records"),
     }
+
+
+def _aplicar_esfera1(
+    df_dev: pd.DataFrame,
+    df_teste: pd.DataFrame,
+    fila: queue.Queue[dict[str, Any]],
+    config: ConfigEsfera1,
+) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    """Esfera 1 (agregação temporal, `python/agregacao_temporal`) como
+    tratamento opcional em memória -- igual à esfera 2 (`_rodar_esfera2`),
+    nunca grava nada em disco nem cria/sobrescreve dataset. Roda logo após
+    `carregar_dataset`, antes de tudo o resto (Construção, Esfera 2,
+    Categorização...): reduz um dataset com várias linhas por chave a uma
+    linha por chave.
+
+    dev e teste são agregados SEPARADAMENTE (nunca juntados e re-splitados)
+    -- preserva o split que o usuário já escolheu no upload; cada linha já
+    marcada dev/teste continua do mesmo lado, só colapsada por chave. `y`
+    já existe como coluna normal em ambas as tabelas (todo dataset já tem
+    `y`, renomeado no upload), então a mesma linha por chave que sobra
+    depois do agrupamento já carrega a resposta certa -- sem precisar de
+    um arquivo de alvo à parte como o feature-lab às vezes usa.
+    """
+    if not config.ativo:
+        return df_dev, df_teste, []
+    if not config.chave or not config.coluna_tempo or not config.colunas_valor or not config.janelas:
+        raise ValueError("Esfera 1: informe chave, coluna tempo, colunas de valor e ao menos uma janela")
+
+    dev_agregado, teste_agregado, colunas_geradas = pipeline_lab_esfera1.aplicar(
+        df_dev, df_teste, config.chave, config.coluna_tempo, config.colunas_valor, config.janelas
+    )
+    fila.put(
+        {
+            "tipo": "etapa",
+            "mensagem": (
+                f"Esfera 1: {len(df_dev)}+{len(df_teste)} linhas → "
+                f"{len(dev_agregado)}+{len(teste_agregado)} chaves"
+            ),
+        }
+    )
+    return dev_agregado, teste_agregado, colunas_geradas
 
 
 def _construir(
@@ -174,6 +294,72 @@ def _construir(
     return df_dev, df_teste, [p.nome for p in todos_pares]
 
 
+def _rodar_esfera2(
+    df_dev: pd.DataFrame,
+    df_teste: pd.DataFrame,
+    fila: queue.Queue[dict[str, Any]],
+    config: ConfigEsfera2,
+) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    """Esfera 2 (descoberta de interação, `python/interacao`, ver
+    `app/backend/feature_lab.py` pra motivação completa) -- roda DEPOIS da
+    Construção (módulo 1) e ANTES de Categorização+Transformação (módulo 2)
+    de propósito: as transformações de potência (log/raiz/quad/cubo/inversa)
+    só existem a partir do módulo 2, então nesse ponto do pipeline elas
+    ainda não existem -- o GBM nunca vê `idade` e `idade_log` ao mesmo
+    tempo, não precisa de filtro extra pra evitar regra redundante entre
+    escalas da mesma variável.
+
+    Colunas categóricas são WOE-codificadas só internamente, pra threshold
+    de regra fazer sentido em variável sem ordem real -- as colunas
+    ORIGINAIS (`df_dev`/`df_teste`) seguem intactas pro módulo 2 categorizar
+    do jeito de sempre (WOE monotônica supervisionada de verdade, não o WOE
+    simples usado aqui só pra threshold). Só as regras estáveis (IV teste
+    >= `config.iv_minimo` -- nunca o IV de dev, que já foi usado pra
+    escolher a regra e está inflado por construção) viram coluna 0/1 nova.
+    """
+    df_dev_novo, df_teste_novo, colunas_regra = pipeline_lab_esfera2.aplicar(
+        df_dev,
+        df_teste,
+        colunas_categoricas=config.colunas_categoricas,
+        profundidade_maxima=config.profundidade_maxima,
+        n_arvores=config.n_arvores,
+        min_suporte=config.min_suporte,
+        max_suporte=config.max_suporte,
+        max_regras=config.max_regras,
+        permitir_cruzamento_entre_bases=config.permitir_cruzamento_entre_bases,
+        proporcao_variaveis_por_split=config.proporcao_variaveis_por_split,
+        iv_minimo=config.iv_minimo,
+    )
+    if not colunas_regra:
+        fila.put({"tipo": "log", "mensagem": "  Esfera 2: nenhuma regra estável encontrada"})
+        return df_dev, df_teste, []
+
+    fila.put(
+        {"tipo": "etapa", "mensagem": f"Esfera 2: {len(colunas_regra)} regra(s) de interação estável(is)"}
+    )
+    return df_dev_novo, df_teste_novo, colunas_regra
+
+
+def _construir_e_esfera2(
+    df_dev: pd.DataFrame,
+    df_teste: pd.DataFrame,
+    fila: queue.Queue[dict[str, Any]],
+    pares_customizados: list[ParConstrucao] | None = None,
+    esfera2: ConfigEsfera2 = _ESFERA2_DESLIGADA,
+) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    """Construção (módulo 1) seguida, opcionalmente, da esfera 2 -- nessa
+    ordem específica (ver `_rodar_esfera2`). Ponto único que todo caminho
+    do pipeline (`_construir_e_transformar`, os módulos isolados de
+    inspeção, `rodar_pipeline`) passa antes de chegar em Categorização."""
+    df_dev, df_teste, colunas_construidas = _construir(
+        df_dev, df_teste, fila, pares_customizados=pares_customizados
+    )
+    colunas_regra: list[str] = []
+    if esfera2.ativo:
+        df_dev, df_teste, colunas_regra = _rodar_esfera2(df_dev, df_teste, fila, esfera2)
+    return df_dev, df_teste, [*colunas_construidas, *colunas_regra]
+
+
 def _categorizar_e_transformar(
     df_dev: pd.DataFrame,
     df_teste: pd.DataFrame,
@@ -196,74 +382,17 @@ def _categorizar_e_transformar(
     colunas_candidatas = [c for c in df_dev.columns if c != "y"]
     fila.put({"tipo": "etapa", "mensagem": f"Categorização + WOE: {len(colunas_candidatas)} candidatas"})
 
-    woe_dev: dict[str, Any] = {"y": df_dev["y"]}
-    woe_teste: dict[str, Any] = {"y": df_teste["y"]}
-    iv_por_variavel: dict[str, float] = {}
-    n_potencia = 0
+    def _ao_processar_coluna(coluna: str, iv: float) -> None:
+        classificacao = classificar_iv(iv)
+        fila.put({"tipo": "log", "mensagem": f"  {coluna}: IV={iv:.4f} ({classificacao})"})
 
-    for coluna in colunas_candidatas:
-        try:
-            # datasets sintéticos do lab já nomeiam a variável crua com sufixo
-            # "_woe" por convenção (ver docs/algoritmos-originais/pedro-wise-resumo.md)
-            # — usamos a base semântica (sem esse sufixo) tanto pro nome WOE
-            # quanto pras transformações de potência, senão elas ficariam com
-            # bases diferentes e o Pedro_Wise nunca as veria como alternativas.
-            base_semantica = coluna[:-4] if coluna.endswith("_woe") else coluna
-            eh_numerica = pd.api.types.is_numeric_dtype(df_dev[coluna])
-
-            if eh_numerica:
-                # Numérica: categoriza (binning monotônico) antes do WOE.
-                resultado_bin = bins_monotonicos(df_dev[coluna], df_dev["y"], n_bins_inicial=15)
-                if len(resultado_bin.edges) < 3:
-                    continue
-                bin_dev = aplicar_bins(df_dev[coluna], resultado_bin.edges)
-                bin_teste = aplicar_bins(df_teste[coluna], resultado_bin.edges)
-            else:
-                # Categórica (texto/data-como-string): sem binning — cada
-                # categoria já É o "bin", prática padrão de WOE categórico
-                # (ver docs/literatura/categorizacao.md: binning existe pra
-                # discretizar CONTÍNUAS, não se aplica aqui).
-                bin_dev = df_dev[coluna]
-                bin_teste = df_teste[coluna]
-
-            tabela = ajustar_woe(bin_dev, df_dev["y"])
-            nome_woe = f"{base_semantica}_woe"
-            woe_dev[nome_woe] = aplicar_woe(bin_dev, tabela)
-            woe_teste[nome_woe] = aplicar_woe(bin_teste, tabela)
-            # Chave = base semântica (não `coluna` crua) — pra bater com
-            # `pedro_wise.base.extrair_base` de qualquer derivada (`_woe`,
-            # `_bin`, `_log`...) no módulo de pré-seleção, que precisa achar
-            # o IV de uma variável a partir do nome de QUALQUER versão dela.
-            iv_por_variavel[base_semantica] = tabela.iv_total
-            classificacao = classificar_iv(tabela.iv_total)
-            mensagem = f"  {coluna}: IV={tabela.iv_total:.4f} ({classificacao})"
-            fila.put({"tipo": "log", "mensagem": mensagem})
-
-            if gerar_bin_ordinal and eh_numerica:
-                nome_bin = f"{base_semantica}_bin"
-                woe_dev[nome_bin] = bin_dev.astype(float)
-                woe_teste[nome_bin] = bin_teste.astype(float)
-
-            if gerar_transformacoes_potencia and eh_numerica:
-                extras_dev = gerar_transformacoes_fixas(df_dev[coluna], base_semantica)
-                extras_teste = gerar_transformacoes_fixas(df_teste[coluna], base_semantica)
-                # só mantém transformações válidas (domínio ok) em dev E teste —
-                # senão a coluna existiria só de um lado.
-                for nome_extra in set(extras_dev) & set(extras_teste):
-                    serie_dev, serie_teste = extras_dev[nome_extra], extras_teste[nome_extra]
-                    if not (np.isfinite(serie_dev).all() and np.isfinite(serie_teste).all()):
-                        continue
-                    woe_dev[nome_extra] = serie_dev
-                    woe_teste[nome_extra] = serie_teste
-                    n_potencia += 1
-        except (ValueError, IndexError, TypeError) as e:
-            fila.put({"tipo": "log", "mensagem": f"  [pulado] {coluna}: {e}"})
-
-    if n_potencia:
-        mensagem_potencia = f"  +{n_potencia} transformações de potência (log/quad/cubo/inversas)"
-        fila.put({"tipo": "log", "mensagem": mensagem_potencia})
-
-    return pd.DataFrame(woe_dev), pd.DataFrame(woe_teste), iv_por_variavel
+    return pipeline_lab_categorizar.categorizar_e_transformar(
+        df_dev,
+        df_teste,
+        gerar_transformacoes_potencia=gerar_transformacoes_potencia,
+        gerar_bin_ordinal=gerar_bin_ordinal,
+        ao_processar_coluna=_ao_processar_coluna,
+    )
 
 
 def _construir_e_transformar(
@@ -272,15 +401,18 @@ def _construir_e_transformar(
     fila: queue.Queue[dict[str, Any]],
     gerar_transformacoes_potencia: bool = True,
     gerar_bin_ordinal: bool = True,
+    pares_customizados: list[ParConstrucao] | None = None,
+    esfera2: ConfigEsfera2 = _ESFERA2_DESLIGADA,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
-    """Composição construção → categorização → transformação, usada pelo
-    pipeline "rodar tudo de uma vez" (`rodar_pipeline`). Os módulos também
-    são expostos separadamente para inspeção (`rodar_construcao`,
+    """Composição construção (+ esfera 2 opcional) → categorização →
+    transformação, usada pelo pipeline "rodar tudo de uma vez"
+    (`rodar_pipeline`). Os módulos também são expostos separadamente para
+    inspeção (`rodar_construcao`, `rodar_esfera2`,
     `rodar_categorizacao_transformacao`), sem persistir nada em disco — cada
     chamada de `/api/pipeline/run` recomputa do zero a partir de `dev.csv`/
     `teste.csv`, então não há cache para ficar desatualizado.
     """
-    df_dev, df_teste, _ = _construir(df_dev, df_teste, fila)
+    df_dev, df_teste, _ = _construir_e_esfera2(df_dev, df_teste, fila, pares_customizados, esfera2)
     return _categorizar_e_transformar(
         df_dev,
         df_teste,
@@ -290,18 +422,66 @@ def _construir_e_transformar(
     )
 
 
-def rodar_construcao(dataset: str, pares_customizados: list[ParConstrucao] | None = None) -> dict[str, Any]:
-    """Roda só o módulo de construção, pra inspeção isolada (Fase 3 — UI
-    modular). Não persiste nada; se não houver razões aplicáveis ao
-    dataset nem pares customizados, `colunas_novas` vem vazio.
+def rodar_esfera1(dataset: str, esfera1: ConfigEsfera1) -> dict[str, Any]:
+    """Roda só a esfera 1, pra inspeção isolada da caixa "Esfera 1" no
+    Módulos (antes da Construção). Não persiste nada; devolve as colunas
+    agregadas geradas e as contagens antes/depois."""
+    df_dev, df_teste = carregar_dataset(dataset)
+    fila: queue.Queue[dict[str, Any]] = queue.Queue()
+    n_dev_antes, n_teste_antes = len(df_dev), len(df_teste)
+    df_dev, df_teste, colunas_geradas = _aplicar_esfera1(df_dev, df_teste, fila, esfera1._replace(ativo=True))
+    return {
+        "colunas_novas": colunas_geradas,
+        "n_dev_antes": n_dev_antes,
+        "n_teste_antes": n_teste_antes,
+        "n_dev_depois": len(df_dev),
+        "n_teste_depois": len(df_teste),
+    }
+
+
+def rodar_construcao(
+    dataset: str,
+    pares_customizados: list[ParConstrucao] | None = None,
+    esfera1: ConfigEsfera1 = _ESFERA1_DESLIGADA,
+) -> dict[str, Any]:
+    """Roda esfera 1 (opcional) + o módulo de construção, pra inspeção
+    isolada (Fase 3 — UI modular). Não persiste nada; se não houver razões
+    aplicáveis ao dataset nem pares customizados, `colunas_novas` vem
+    vazio.
     """
     df_dev, df_teste = carregar_dataset(dataset)
     fila: queue.Queue[dict[str, Any]] = queue.Queue()
+    df_dev, df_teste, _ = _aplicar_esfera1(df_dev, df_teste, fila, esfera1)
     df_dev, _, colunas_novas = _construir(df_dev, df_teste, fila, pares_customizados=pares_customizados)
     return {
         "colunas_novas": colunas_novas,
         "n_colunas_total": len([c for c in df_dev.columns if c != "y"]),
         "amostra": df_dev.head(5).to_dict(orient="records"),
+    }
+
+
+def rodar_esfera2(
+    dataset: str,
+    usar_construcao: bool = True,
+    pares_customizados: list[ParConstrucao] | None = None,
+    esfera2: ConfigEsfera2 = _ESFERA2_ATIVA,
+    esfera1: ConfigEsfera1 = _ESFERA1_DESLIGADA,
+) -> dict[str, Any]:
+    """Roda esfera 1 (opcional) + construção (opcional) + esfera 2, pra
+    inspeção isolada da caixa "Esfera 2" no Módulos (entre Construção e
+    Categorização). Não persiste nada; devolve as regras estáveis
+    encontradas com IV dev/teste, igual ao que o feature-lab mostra, só que
+    operando direto no dataset já dev/teste-splitado da aba Dataset (mesmo
+    split que o resto do pipeline usa, sem round-trip de split separado)."""
+    df_dev, df_teste = carregar_dataset(dataset)
+    fila: queue.Queue[dict[str, Any]] = queue.Queue()
+    df_dev, df_teste, _ = _aplicar_esfera1(df_dev, df_teste, fila, esfera1)
+    if usar_construcao:
+        df_dev, df_teste, _ = _construir(df_dev, df_teste, fila, pares_customizados=pares_customizados)
+    _, _, colunas_regra = _rodar_esfera2(df_dev, df_teste, fila, esfera2._replace(ativo=True))
+    return {
+        "colunas_novas": colunas_regra,
+        "n_regras_estaveis": len(colunas_regra),
     }
 
 
@@ -311,14 +491,18 @@ def rodar_categorizacao_transformacao(
     pares_customizados: list[ParConstrucao] | None = None,
     gerar_transformacoes_potencia: bool = True,
     gerar_bin_ordinal: bool = True,
+    esfera2: ConfigEsfera2 = _ESFERA2_DESLIGADA,
+    esfera1: ConfigEsfera1 = _ESFERA1_DESLIGADA,
 ) -> dict[str, Any]:
-    """Roda construção (opcional) + categorização + transformação, pra
-    inspeção isolada (Fase 3 — UI modular). Não persiste nada.
+    """Roda esfera 1 (opcional) + construção (opcional) + esfera 2
+    (opcional) + categorização + transformação, pra inspeção isolada
+    (Fase 3 — UI modular). Não persiste nada.
     """
     df_dev, df_teste = carregar_dataset(dataset)
     fila: queue.Queue[dict[str, Any]] = queue.Queue()
+    df_dev, df_teste, _ = _aplicar_esfera1(df_dev, df_teste, fila, esfera1)
     if usar_construcao:
-        df_dev, df_teste, _ = _construir(df_dev, df_teste, fila, pares_customizados=pares_customizados)
+        df_dev, df_teste, _ = _construir_e_esfera2(df_dev, df_teste, fila, pares_customizados, esfera2)
     _, _, iv_por_variavel = _categorizar_e_transformar(
         df_dev,
         df_teste,
@@ -342,16 +526,20 @@ def rodar_pre_selecao(
     limiar_variancia: float | None = 1e-6,
     limiar_iv: float | None = 0.02,
     limiar_correlacao: float | None = 0.9,
+    esfera2: ConfigEsfera2 = _ESFERA2_DESLIGADA,
+    esfera1: ConfigEsfera1 = _ESFERA1_DESLIGADA,
 ) -> dict[str, Any]:
-    """Roda construção (opcional) + categorização + transformação, seguido
-    da pré-seleção (variância + IV + correlação, `python/preselecao/`) —
-    módulo isolado (Fase 3 — UI modular). Não persiste nada; cada limiar
-    pode ser `None` pra pular aquele filtro.
+    """Roda esfera 1 (opcional) + construção (opcional) + esfera 2
+    (opcional) + categorização + transformação, seguido da pré-seleção
+    (variância + IV + correlação, `python/preselecao/`) — módulo isolado
+    (Fase 3 — UI modular). Não persiste nada; cada limiar pode ser `None`
+    pra pular aquele filtro.
     """
     df_dev, df_teste = carregar_dataset(dataset)
     fila: queue.Queue[dict[str, Any]] = queue.Queue()
+    df_dev, df_teste, _ = _aplicar_esfera1(df_dev, df_teste, fila, esfera1)
     if usar_construcao:
-        df_dev, df_teste, _ = _construir(df_dev, df_teste, fila, pares_customizados=pares_customizados)
+        df_dev, df_teste, _ = _construir_e_esfera2(df_dev, df_teste, fila, pares_customizados, esfera2)
     woe_dev, _, iv_por_variavel = _categorizar_e_transformar(
         df_dev,
         df_teste,
@@ -455,18 +643,22 @@ def rodar_pipeline(
     limiar_correlacao: float | None = 0.9,
     p_valor_maximo: float | None = None,
     comparar_sem_p_valor: bool = True,
+    esfera2: ConfigEsfera2 = _ESFERA2_DESLIGADA,
+    esfera1: ConfigEsfera1 = _ESFERA1_DESLIGADA,
     fila: queue.Queue[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Roda o pipeline (opcionalmente construção+categorização+WOE, opcionalmente
-    pré-seleção) seguido do Pedro_Wise (níveis 1-2.5, ou 1-3 se `nivel3_ativado`),
-    publicando progresso em `fila` em tempo real via `CapturadorProgresso`.
-    Retorna o resultado final (também colocado na fila como último item, tipo
-    "resultado", pelo chamador).
+    """Roda o pipeline (esfera 1 opcional, opcionalmente construção + esfera
+    2 + categorização+WOE, opcionalmente pré-seleção) seguido do Pedro_Wise
+    (níveis 1-2.5, ou 1-3 se `nivel3_ativado`), publicando progresso em
+    `fila` em tempo real via `CapturadorProgresso`. Retorna o resultado
+    final (também colocado na fila como último item, tipo "resultado",
+    pelo chamador).
     """
     fila = fila if fila is not None else queue.Queue()
     t0 = time.perf_counter()
 
     df_dev, df_teste = carregar_dataset(dataset)
+    df_dev, df_teste, _ = _aplicar_esfera1(df_dev, df_teste, fila, esfera1)
     iv_por_variavel: dict[str, float] = {}
 
     if usar_pipeline_completo:
@@ -476,6 +668,7 @@ def rodar_pipeline(
             fila,
             gerar_transformacoes_potencia=gerar_transformacoes_potencia,
             gerar_bin_ordinal=gerar_bin_ordinal,
+            esfera2=esfera2,
         )
         if usar_pre_selecao:
             resultado_selecao = pre_selecionar(

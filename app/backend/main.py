@@ -21,6 +21,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from feature_lab import (
     carregar_base_bruta,
+    comparar_com_pedro_wise,
     descobrir_em_tabela,
     info_painel,
     listar_bases,
@@ -43,11 +44,15 @@ from ingestao import (
     valores_distintos,
 )
 from logica import (
+    ConfigEsfera1,
+    ConfigEsfera2,
     ParConstrucao,
     listar_datasets,
     preview_dataset,
     rodar_categorizacao_transformacao,
     rodar_construcao,
+    rodar_esfera1,
+    rodar_esfera2,
     rodar_pipeline,
     rodar_pre_selecao,
 )
@@ -108,9 +113,41 @@ def _par_construcao(p: ParConstrucaoAPI) -> ParConstrucao:
     return ParConstrucao(p.numerador, p.denominador, nome, p.operacao)
 
 
+class ConfigEsfera1API(BaseModel):
+    """Espelha `logica.ConfigEsfera1` -- roda logo após carregar o dataset,
+    antes de tudo o resto (Construção, Esfera 2, Categorização...). Nunca
+    grava/sobrescreve dataset -- tratamento em memória, mesmo padrão da
+    esfera 2."""
+
+    ativo: bool = False
+    chave: str = ""
+    coluna_tempo: str = ""
+    colunas_valor: list[str] | None = None
+    janelas: list[int] | None = None
+
+    def para_config(self) -> ConfigEsfera1:
+        return ConfigEsfera1(**self.model_dump())
+
+
+class ConfigModuloEsfera1(BaseModel):
+    dataset: str
+    esfera1: ConfigEsfera1API = ConfigEsfera1API(ativo=True)
+
+
+@app.post("/api/modulo/esfera1")
+def rota_rodar_esfera1(config: ConfigModuloEsfera1) -> dict[str, Any]:
+    if config.dataset not in listar_datasets():
+        raise HTTPException(status_code=404, detail=f"Dataset '{config.dataset}' não encontrado")
+    try:
+        return rodar_esfera1(config.dataset, esfera1=config.esfera1.para_config())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 class ConfigConstrucao(BaseModel):
     dataset: str
     pares_customizados: list[ParConstrucaoAPI] = []
+    esfera1: ConfigEsfera1API = ConfigEsfera1API()
 
 
 @app.post("/api/modulo/construcao")
@@ -118,7 +155,48 @@ def rota_rodar_construcao(config: ConfigConstrucao) -> dict[str, Any]:
     if config.dataset not in listar_datasets():
         raise HTTPException(status_code=404, detail=f"Dataset '{config.dataset}' não encontrado")
     pares = [_par_construcao(p) for p in config.pares_customizados]
-    return rodar_construcao(config.dataset, pares_customizados=pares)
+    return rodar_construcao(config.dataset, pares_customizados=pares, esfera1=config.esfera1.para_config())
+
+
+class ConfigEsfera2API(BaseModel):
+    """Espelha `logica.ConfigEsfera2` -- roda entre Construção e
+    Categorização, ver `_rodar_esfera2` pro raciocínio de ordem."""
+
+    ativo: bool = False
+    colunas_categoricas: list[str] | None = None
+    profundidade_maxima: int = 2
+    n_arvores: int = 60
+    min_suporte: float = 0.02
+    max_suporte: float = 0.5
+    max_regras: int = 10
+    permitir_cruzamento_entre_bases: bool = True
+    proporcao_variaveis_por_split: float | None = None
+    iv_minimo: float = 0.02
+
+    def para_config(self) -> ConfigEsfera2:
+        return ConfigEsfera2(**self.model_dump())
+
+
+class ConfigModuloEsfera2(BaseModel):
+    dataset: str
+    usar_construcao: bool = True
+    pares_customizados: list[ParConstrucaoAPI] = []
+    esfera2: ConfigEsfera2API = ConfigEsfera2API(ativo=True)
+    esfera1: ConfigEsfera1API = ConfigEsfera1API()
+
+
+@app.post("/api/modulo/esfera2")
+def rota_rodar_esfera2(config: ConfigModuloEsfera2) -> dict[str, Any]:
+    if config.dataset not in listar_datasets():
+        raise HTTPException(status_code=404, detail=f"Dataset '{config.dataset}' não encontrado")
+    pares = [_par_construcao(p) for p in config.pares_customizados]
+    return rodar_esfera2(
+        config.dataset,
+        usar_construcao=config.usar_construcao,
+        pares_customizados=pares,
+        esfera2=config.esfera2.para_config(),
+        esfera1=config.esfera1.para_config(),
+    )
 
 
 class ConfigCategorizacaoTransformacao(BaseModel):
@@ -127,6 +205,8 @@ class ConfigCategorizacaoTransformacao(BaseModel):
     pares_customizados: list[ParConstrucaoAPI] = []
     gerar_transformacoes_potencia: bool = True
     gerar_bin_ordinal: bool = True
+    esfera2: ConfigEsfera2API = ConfigEsfera2API()
+    esfera1: ConfigEsfera1API = ConfigEsfera1API()
 
 
 @app.post("/api/modulo/categorizacao-transformacao")
@@ -140,6 +220,8 @@ def rota_rodar_categorizacao_transformacao(config: ConfigCategorizacaoTransforma
         pares_customizados=pares,
         gerar_transformacoes_potencia=config.gerar_transformacoes_potencia,
         gerar_bin_ordinal=config.gerar_bin_ordinal,
+        esfera2=config.esfera2.para_config(),
+        esfera1=config.esfera1.para_config(),
     )
 
 
@@ -152,6 +234,8 @@ class ConfigPreSelecao(BaseModel):
     limiar_variancia: float | None = 1e-6
     limiar_iv: float | None = 0.02
     limiar_correlacao: float | None = 0.9
+    esfera2: ConfigEsfera2API = ConfigEsfera2API()
+    esfera1: ConfigEsfera1API = ConfigEsfera1API()
 
 
 @app.post("/api/modulo/pre-selecao")
@@ -168,6 +252,8 @@ def rota_rodar_pre_selecao(config: ConfigPreSelecao) -> dict[str, Any]:
         limiar_variancia=config.limiar_variancia,
         limiar_iv=config.limiar_iv,
         limiar_correlacao=config.limiar_correlacao,
+        esfera2=config.esfera2.para_config(),
+        esfera1=config.esfera1.para_config(),
     )
 
 
@@ -322,6 +408,12 @@ class ConfigPipeline(BaseModel):
     # Restrição de significância — None desliga (padrão)
     p_valor_maximo: float | None = None
     comparar_sem_p_valor: bool = True
+    # Esfera 2 (descoberta de interação) — opt-in, roda entre Construção e
+    # Categorização (só faz sentido com usar_pipeline_completo=True).
+    esfera2: ConfigEsfera2API = ConfigEsfera2API()
+    # Esfera 1 (agregação temporal) — opt-in, roda logo após carregar o
+    # dataset, antes de tudo o resto (independe de usar_pipeline_completo).
+    esfera1: ConfigEsfera1API = ConfigEsfera1API()
 
 
 def _worker(config: ConfigPipeline, fila: queue.Queue[dict[str, Any] | None]) -> None:
@@ -353,6 +445,8 @@ def _worker(config: ConfigPipeline, fila: queue.Queue[dict[str, Any] | None]) ->
             limiar_correlacao=config.limiar_correlacao,
             p_valor_maximo=config.p_valor_maximo,
             comparar_sem_p_valor=config.comparar_sem_p_valor,
+            esfera2=config.esfera2.para_config(),
+            esfera1=config.esfera1.para_config(),
             fila=fila,  # type: ignore[arg-type]
         )
         fila.put(resultado)
@@ -477,6 +571,7 @@ class ConfigDescobrir(BaseModel):
     coluna_split: str | None = None
     valores_dev: list[str] | None = None
     valores_teste: list[str] | None = None
+    colunas_categoricas: list[str] | None = None
 
 
 @app.post("/api/feature-lab/descobrir")
@@ -499,6 +594,7 @@ def rota_descobrir_em_tabela(config: ConfigDescobrir) -> dict[str, Any]:
             coluna_split=config.coluna_split,
             valores_dev=config.valores_dev,
             valores_teste=config.valores_teste,
+            colunas_categoricas=config.colunas_categoricas,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -515,6 +611,7 @@ class ConfigDireto(BaseModel):
     permitir_cruzamento_entre_bases: bool = True
     coluna_y: str = "y"
     proporcao_variaveis_por_split: float | None = None
+    colunas_categoricas: list[str] | None = None
 
 
 @app.post("/api/feature-lab/direto")
@@ -533,6 +630,7 @@ def rota_rodar_direto(config: ConfigDireto) -> dict[str, Any]:
             permitir_cruzamento_entre_bases=config.permitir_cruzamento_entre_bases,
             coluna_y=config.coluna_y,
             proporcao_variaveis_por_split=config.proporcao_variaveis_por_split,
+            colunas_categoricas=config.colunas_categoricas,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -550,6 +648,16 @@ def rota_valores_distintos_base(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+class CondicaoAPI(BaseModel):
+    feature: str
+    operador: Literal["<=", ">"]
+    limiar: float
+
+
+class RegraAPI(BaseModel):
+    condicoes: list[CondicaoAPI]
+
+
 class ConfigRegressaoManual(BaseModel):
     tabela: list[dict[str, Any]]
     colunas_x: list[str]
@@ -558,12 +666,17 @@ class ConfigRegressaoManual(BaseModel):
     coluna_split: str | None = None
     valores_dev: list[str] | None = None
     valores_teste: list[str] | None = None
+    regras: list[RegraAPI] = []
+    colunas_categoricas: list[str] | None = None
 
 
 @app.post("/api/feature-lab/regressao-manual")
 def rota_rodar_regressao_manual(config: ConfigRegressaoManual) -> dict[str, Any]:
     """Esfera 3: regressão logística manual com as variáveis escolhidas --
-    KS/AUC/coeficientes/curva de decis, mesmo núcleo do Pedro_Wise."""
+    KS/AUC/coeficientes/curva de decis, mesmo núcleo do Pedro_Wise. `regras`
+    (opcional): regras da esfera 2 materializadas como coluna 0/1 e somadas
+    às variáveis -- split, WOE de categórica e materialização acontecem
+    todos dentro de `rodar_regressao_manual`, numa única chamada."""
     try:
         return rodar_regressao_manual(
             registros=config.tabela,
@@ -573,6 +686,40 @@ def rota_rodar_regressao_manual(config: ConfigRegressaoManual) -> dict[str, Any]
             coluna_split=config.coluna_split,
             valores_dev=config.valores_dev,
             valores_teste=config.valores_teste,
+            regras=[r.model_dump() for r in config.regras],
+            colunas_categoricas=config.colunas_categoricas,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+class ConfigCompararPedroWise(BaseModel):
+    tabela: list[dict[str, Any]]
+    colunas_base: list[str]
+    regras: list[RegraAPI] = []
+    coluna_y: str = "y"
+    metodo_split: Literal["aleatorio", "coluna"] = "aleatorio"
+    coluna_split: str | None = None
+    valores_dev: list[str] | None = None
+    valores_teste: list[str] | None = None
+    colunas_categoricas: list[str] | None = None
+
+
+@app.post("/api/feature-lab/comparar-pedro-wise")
+def rota_comparar_pedro_wise(config: ConfigCompararPedroWise) -> dict[str, Any]:
+    """Prova de valor: roda a seleção stepwise real do Pedro_Wise com e sem
+    as regras da esfera 2 como candidatas, compara o KS de cada modelo final."""
+    try:
+        return comparar_com_pedro_wise(
+            registros=config.tabela,
+            colunas_base=config.colunas_base,
+            regras=[r.model_dump() for r in config.regras],
+            coluna_y=config.coluna_y,
+            metodo_split=config.metodo_split,
+            coluna_split=config.coluna_split,
+            valores_dev=config.valores_dev,
+            valores_teste=config.valores_teste,
+            colunas_categoricas=config.colunas_categoricas,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

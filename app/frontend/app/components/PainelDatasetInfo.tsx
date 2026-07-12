@@ -21,6 +21,27 @@ function Cartao({ rotulo, valor }: { rotulo: string; valor: string | number }) {
   );
 }
 
+/** Régua de IV comum em scorecards (Siddiqi): <0.02 sem poder preditivo,
+ * 0.02-0.1 fraco, 0.1-0.3 médio, 0.3-0.5 forte, >0.5 suspeito (possível
+ * vazamento) — mesma classificação do backend (`classificar_iv`), só pra
+ * colorir aqui sem precisar de mais uma chamada de API. */
+function corIV(iv: number): string {
+  if (iv < 0.02) return "text-slate-500";
+  if (iv < 0.1) return "text-slate-300";
+  if (iv < 0.3) return "text-sky-400";
+  if (iv < 0.5) return "text-emerald-400";
+  return "text-amber-400";
+}
+
+function CelulaIV({ iv }: { iv: number | null }) {
+  if (iv === null) return <td className="whitespace-nowrap px-3 py-1.5 text-right text-slate-600">—</td>;
+  return (
+    <td className={`whitespace-nowrap px-3 py-1.5 text-right tabular-nums font-medium ${corIV(iv)}`}>
+      {iv.toFixed(3)}
+    </td>
+  );
+}
+
 function BarraAusente({ pct }: { pct: number }) {
   const cor = pct === 0 ? "bg-slate-700" : pct < 0.05 ? "bg-amber-600" : "bg-rose-600";
   return (
@@ -65,11 +86,16 @@ export default function PainelDatasetInfo({ dataset }: Props) {
   if (erro) return <p className="text-sm text-red-400">{erro}</p>;
   if (!preview) return null;
 
+  const porIvDesc = (a: string, b: string) =>
+    (preview.resumo_colunas[b]?.iv ?? -1) - (preview.resumo_colunas[a]?.iv ?? -1);
+
   const colunasVisiveis = preview.colunas.filter((c) => c !== "y");
-  const numericas = colunasVisiveis.filter(
-    (c) => preview.resumo_colunas[c]?.tipo === "numerico",
-  ) as string[];
-  const categoricas = colunasVisiveis.filter((c) => preview.resumo_colunas[c]?.tipo === "categorico");
+  const numericas = colunasVisiveis
+    .filter((c) => preview.resumo_colunas[c]?.tipo === "numerico")
+    .sort(porIvDesc) as string[];
+  const categoricas = colunasVisiveis
+    .filter((c) => preview.resumo_colunas[c]?.tipo === "categorico")
+    .sort(porIvDesc);
 
   return (
     <div className="flex flex-col gap-6">
@@ -98,6 +124,7 @@ export default function PainelDatasetInfo({ dataset }: Props) {
                   <th className="whitespace-nowrap px-3 py-2 text-right font-medium">máximo</th>
                   <th className="whitespace-nowrap px-3 py-2 text-right font-medium">média</th>
                   <th className="whitespace-nowrap px-3 py-2 text-right font-medium">desvio</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">IV</th>
                 </tr>
               </thead>
               <tbody>
@@ -124,6 +151,7 @@ export default function PainelDatasetInfo({ dataset }: Props) {
                       <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-slate-400">
                         {r.desvio_padrao.toFixed(2)}
                       </td>
+                      <CelulaIV iv={r.iv} />
                     </tr>
                   );
                 })}
@@ -146,6 +174,7 @@ export default function PainelDatasetInfo({ dataset }: Props) {
                   <th className="whitespace-nowrap px-3 py-2 text-right font-medium">% ausente</th>
                   <th className="whitespace-nowrap px-3 py-2 text-right font-medium">distintos</th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium">top valores</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium">IV</th>
                 </tr>
               </thead>
               <tbody>
@@ -169,6 +198,7 @@ export default function PainelDatasetInfo({ dataset }: Props) {
                           .map((v) => `${v.valor} (${v.contagem})`)
                           .join(", ")}
                       </td>
+                      <CelulaIV iv={r.iv} />
                     </tr>
                   );
                 })}
