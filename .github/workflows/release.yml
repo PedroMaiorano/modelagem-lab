@@ -23,7 +23,10 @@ jobs:
           pip install -e .
 
       - name: Rodar testes antes de publicar
-        run: pip install pytest && pytest tests -x -q
+        # `requests` é dependência só de scraping/ (não faz parte do pacote
+        # instalável -- não está em [tool.setuptools] packages), por isso
+        # não entra em [project].dependencies; instalada aqui só pros testes.
+        run: pip install pytest requests && pytest tests -x -q
 
       - name: Buildar sdist + wheel
         run: python -m build
