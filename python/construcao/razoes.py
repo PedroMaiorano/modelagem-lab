@@ -11,6 +11,8 @@ originais. Nenhuma das 23 colunas cruas captura isso diretamente.
 
 from __future__ import annotations
 
+from itertools import permutations
+
 import pandas as pd
 
 
@@ -46,4 +48,40 @@ def construir_razoes_em_lote(
         nome: construir_razao(df[numerador], df[denominador], nome, epsilon)
         for numerador, denominador, nome in pares
     }
+    return pd.DataFrame(construidas, index=df.index)
+
+
+def construir_todas_as_razoes(
+    df: pd.DataFrame,
+    colunas: list[str] | None = None,
+    incluir_diferenca: bool = True,
+    epsilon: float = 1e-6,
+) -> pd.DataFrame:
+    """Gera razão (e, opcionalmente, diferença) para TODO par ordenado de
+    colunas numéricas -- nome genérico automático (`"{a}_sobre_{b}"`,
+    `"{a}_menos_{b}"`), sem precisar listar os pares na mão. Contraponto
+    deliberado ao resto do módulo: `construir_razao`/`construir_razoes_em_lote`
+    existem porque razão de negócio BEM ESCOLHIDA (ex.: `pago/fatura`) é mais
+    interpretável que gerar tudo -- ver o raciocínio de escopo v1 mínimo no
+    docstring do módulo. Esta função é o escape hatch pra quando você não
+    tem esse conhecimento de domínio ainda e quer deixar a pré-seleção
+    (`preselecao.pre_selecionar`) filtrar o que sobra depois.
+
+    Ordem importa (`a/b` != `b/a`) -- por isso `permutations`, não
+    `combinations`: gera as duas direções. Um dataset com `n` colunas
+    numéricas produz `n*(n-1)` razões (e o dobro se `incluir_diferenca`,
+    embora `a-b` e `b-a` sejam redundantes por sinal -- mantidas mesmo assim
+    por simetria de nome com a razão, a pré-seleção descarta a redundante
+    via `filtrar_correlacao`). Cresce quadraticamente: com dezenas de
+    colunas numéricas já gera centenas/milhares de candidatas -- rode
+    `preselecao.pre_selecionar` logo em seguida.
+    """
+    colunas_numericas = colunas or [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    construidas: dict[str, pd.Series] = {}
+    for a, b in permutations(colunas_numericas, 2):
+        nome_razao = f"{a}_sobre_{b}"
+        construidas[nome_razao] = construir_razao(df[a], df[b], nome_razao, epsilon)
+        if incluir_diferenca:
+            nome_diferenca = f"{a}_menos_{b}"
+            construidas[nome_diferenca] = construir_diferenca(df[a], df[b], nome_diferenca)
     return pd.DataFrame(construidas, index=df.index)

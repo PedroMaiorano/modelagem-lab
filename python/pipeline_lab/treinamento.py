@@ -8,6 +8,7 @@ decis) em vez do objeto `SelectionState` cru.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -74,6 +75,15 @@ class ResultadoTreinamento:
     coeficientes: dict[str, float]
     estatisticas: dict[str, dict[str, float]]
     tabela_decis: list[dict[str, Any]]
+    historico: list[str]
+    """Um evento por passo aceito pela busca (ex.: `"forward_simples: +renda_woe => score=0.3120"`),
+    na ordem em que aconteceram -- o `trace` que o núcleo `pedro_wise` já produz
+    internamente (`SearchTrace`/`Level1Trace`), só não era exposto aqui antes.
+    Útil pra revisar depois de terminado o que a busca fez, passo a passo. Pra
+    ACOMPANHAR ao vivo enquanto roda (em vez de só depois), configure o
+    logging ANTES de chamar `treinar`: `logging.basicConfig(level=logging.INFO, force=True)`
+    -- o núcleo já usa `logger.info(...)` em cada passo, é a mesma informação
+    deste histórico, só que impressa em tempo real."""
 
 
 def treinar(
@@ -96,12 +106,28 @@ def treinar(
     n_best_backward: int = 2,
     profundidade_maxima_nivel3: int = 2,
     p_valor_maximo: float | None = None,
+    verbose: bool = True,
 ) -> ResultadoTreinamento:
     """Roda o Pedro_Wise (níveis 1-2.5, ou 1-3 se `nivel3_ativado`) sobre
     `df_dev`/`df_teste` já prontos (todas as colunas exceto `y` são
     candidatas). `criterio` ("teste"/"dev"/"min") é o objetivo que o
     forward/backward otimiza em TODA a busca -- não um detalhe cosmético,
-    é o que decide se uma variável entra ou sai a cada passo."""
+    é o que decide se uma variável entra ou sai a cada passo.
+
+    `verbose=True` (default) liga `logging.INFO` no namespace `pedro_wise`
+    se ainda não houver nenhum handler configurado -- em notebook/REPL isso
+    faz cada passo aceito (forward/transformação/backward, em qual nível,
+    com que score) aparecer NA HORA, em vez de só depois em `historico`.
+    Se você já configura logging global no seu ambiente, isso não interfere
+    (só age quando não há handler nenhum ainda). `verbose=False` desliga
+    essa conveniência -- `historico` continua preenchido de qualquer jeito.
+    """
+    if verbose:
+        logger_pedro_wise = logging.getLogger("pedro_wise")
+        if not logging.getLogger().hasHandlers() and not logger_pedro_wise.hasHandlers():
+            logging.basicConfig(level=logging.INFO, format="%(message)s")
+        logger_pedro_wise.setLevel(logging.INFO)
+
     estimator = LogisticGLM()
     metric = KSGaussianMetric(criterio=criterio)  # type: ignore[arg-type]
     modelo_nulo = estimator.fit(df_dev[[]], df_dev["y"])
@@ -129,13 +155,14 @@ def treinar(
         config3 = Level3Config(
             ativado=True, n_best_backward=n_best_backward, profundidade_maxima=profundidade_maxima_nivel3
         )
-        estado_final, _ = run_pedro_wise_completo(
+        estado_final, trace = run_pedro_wise_completo(
             estimator, metric, df_dev, df_teste, estado_inicial, config1, config2, config3
         )
     else:
-        estado_final, _ = run_pedro_wise(
+        estado_final, trace = run_pedro_wise(
             estimator, metric, df_dev, df_teste, estado_inicial, config1, config2
         )
+    historico = list(trace.eventos)
 
     variaveis = list(estado_final.variables)
     taxa_evento_dev = float(df_dev["y"].mean())
@@ -152,6 +179,7 @@ def treinar(
             coeficientes={},
             estatisticas={},
             tabela_decis=[],
+            historico=historico,
         )
 
     metric_teste = KSGaussianMetric(criterio="teste")
@@ -176,4 +204,5 @@ def treinar(
         coeficientes=coeficientes,
         estatisticas=estatisticas,
         tabela_decis=_tabela_decis(df_teste["y"], prob_teste),
+        historico=historico,
     )

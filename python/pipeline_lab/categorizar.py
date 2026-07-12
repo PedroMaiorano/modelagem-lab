@@ -13,7 +13,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from categorizacao import aplicar_bins, bins_monotonicos
-from transformacao import ajustar_woe, aplicar_woe, gerar_transformacoes_fixas
+from transformacao import ajustar_woe, aplicar_woe, classificar_iv, gerar_transformacoes_fixas
+
+__all__ = ["categorizar_e_transformar", "classificar_iv"]
 
 
 def categorizar_e_transformar(

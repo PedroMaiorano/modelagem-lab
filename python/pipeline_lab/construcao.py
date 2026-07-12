@@ -7,6 +7,16 @@ completo de escopo.
 
 from __future__ import annotations
 
-from construcao.razoes import construir_diferenca, construir_razao, construir_razoes_em_lote
+from construcao.razoes import (
+    construir_diferenca,
+    construir_razao,
+    construir_razoes_em_lote,
+    construir_todas_as_razoes,
+)
 
-__all__ = ["construir_diferenca", "construir_razao", "construir_razoes_em_lote"]
+__all__ = [
+    "construir_diferenca",
+    "construir_razao",
+    "construir_razoes_em_lote",
+    "construir_todas_as_razoes",
+]

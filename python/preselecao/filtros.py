@@ -90,18 +90,25 @@ def pre_selecionar(
     limiar_correlacao: float | None = 0.9,
 ) -> dict[str, Any]:
     """Aplica os 3 filtros em sequência (cada um opcional via `None`) e
-    resume o funil — quantas candidatas sobraram em cada etapa, útil pra
-    UI mostrar o que foi descartado e por quê.
+    resume o funil — quantas candidatas sobraram em cada etapa, e QUAIS
+    colunas saíram em cada uma (`colunas_descartadas_variancia`,
+    `colunas_descartadas_iv`, `pares_correlacionados_descartados` — este
+    último já vem com o par completo e o `r` de correlação, não só o nome
+    da descartada), útil pra auditar exatamente por que uma variável sumiu.
     """
     colunas = [c for c in df.columns if c != "y"]
     n_inicial = len(colunas)
 
+    colunas_antes_variancia = colunas
     if limiar_variancia is not None:
         colunas = filtrar_variancia(df, colunas, limiar_variancia)
+    colunas_descartadas_variancia = [c for c in colunas_antes_variancia if c not in colunas]
     n_apos_variancia = len(colunas)
 
+    colunas_antes_iv = colunas
     if limiar_iv is not None:
         colunas = filtrar_iv(colunas, iv_por_base, limiar_iv)
+    colunas_descartadas_iv = [c for c in colunas_antes_iv if c not in colunas]
     n_apos_iv = len(colunas)
 
     pares_descartados: list[tuple[str, str, float]] = []
@@ -110,6 +117,8 @@ def pre_selecionar(
 
     return {
         "colunas_mantidas": colunas,
+        "colunas_descartadas_variancia": colunas_descartadas_variancia,
+        "colunas_descartadas_iv": colunas_descartadas_iv,
         "n_inicial": n_inicial,
         "n_apos_variancia": n_apos_variancia,
         "n_apos_iv": n_apos_iv,
