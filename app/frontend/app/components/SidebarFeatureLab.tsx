@@ -8,9 +8,18 @@ interface Props {
   base: BaseFeatureLab | null;
   aoMudarBase: (base: BaseFeatureLab) => void;
   aoEnviarPainel: (arquivo: File, nome: string) => Promise<void>;
+  colunaY: string;
+  aoMudarColunaY: (coluna: string) => void;
 }
 
-export default function SidebarFeatureLab({ bases, base, aoMudarBase, aoEnviarPainel }: Props) {
+export default function SidebarFeatureLab({
+  bases,
+  base,
+  aoMudarBase,
+  aoEnviarPainel,
+  colunaY,
+  aoMudarColunaY,
+}: Props) {
   const [arquivo, setArquivo] = useState<File | null>(null);
   const [nome, setNome] = useState("");
   const [enviando, setEnviando] = useState(false);
@@ -45,6 +54,20 @@ export default function SidebarFeatureLab({ bases, base, aoMudarBase, aoEnviarPa
             </option>
           ))}
         </select>
+      </div>
+
+      <div>
+        <h2 className="text-xs font-medium uppercase tracking-wider text-slate-500 mb-2">Coluna resposta</h2>
+        <input
+          type="text"
+          value={colunaY}
+          onChange={(e) => aoMudarColunaY(e.target.value)}
+          placeholder="y"
+          className="w-full rounded-lg bg-slate-800 border border-slate-600 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        />
+        <p className="mt-1 text-[11px] text-slate-500">
+          Nome da coluna alvo na base — padrão &ldquo;y&rdquo;, troque se a sua for diferente.
+        </p>
       </div>
 
       <div className="flex flex-col gap-2 border-t border-slate-800 pt-4">

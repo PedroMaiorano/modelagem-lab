@@ -48,11 +48,16 @@ type Aba = (typeof ABAS)[number]["id"];
 //: heurística só pra sugerir default no seletor — usuário sempre pode trocar.
 const CANDIDATOS_TEMPO = new Set(["safra", "data", "mes", "tempo", "competencia", "anomes", "day"]);
 
+//: janelas mais comuns em painel mensal — atalho, não limita: dá pra
+//: adicionar qualquer valor pelo campo "outra" ao lado.
+const JANELAS_COMUNS = [2, 3, 6, 9, 12];
+
 export default function FeatureLabPagina() {
   const [aba, setAba] = useState<Aba>("esfera1");
 
   const [bases, setBases] = useState<BaseFeatureLab[]>([]);
   const [base, setBase] = useState<BaseFeatureLab | null>(null);
+  const [colunaY, setColunaY] = useState("y");
   const [colunasBase, setColunasBase] = useState<string[]>([]);
   const [colunasNumericasBase, setColunasNumericasBase] = useState<string[]>([]);
   const [info, setInfo] = useState<InfoPainel | null>(null);
@@ -62,7 +67,8 @@ export default function FeatureLabPagina() {
   const [chave, setChave] = useState("");
   const [colunaTempo, setColunaTempo] = useState("");
   const [colunasValor, setColunasValor] = useState<Set<string>>(new Set());
-  const [janelasTexto, setJanelasTexto] = useState("3");
+  const [janelas, setJanelas] = useState<Set<number>>(new Set([3]));
+  const [janelaCustom, setJanelaCustom] = useState("");
   const [rodandoEsfera1, setRodandoEsfera1] = useState(false);
   const [resultadoEsfera1, setResultadoEsfera1] = useState<ResultadoAgregacao | null>(null);
 
@@ -111,7 +117,7 @@ export default function FeatureLabPagina() {
     if (!base) return;
 
     if (base.tipo === "painel") {
-      buscarInfoPainel(base.nome)
+      buscarInfoPainel(base.nome, colunaY)
         .then((i) => {
           setInfo(i);
           setColunasBase(i.colunas);
@@ -137,13 +143,21 @@ export default function FeatureLabPagina() {
         })
         .catch((e) => setErro(String(e)));
     }
-  }, [base]);
+  }, [base, colunaY]);
 
-  function alternar(conjunto: Set<string>, item: string, aoMudar: (s: Set<string>) => void) {
+  function alternar<T>(conjunto: Set<T>, item: T, aoMudar: (s: Set<T>) => void) {
     const novo = new Set(conjunto);
     if (novo.has(item)) novo.delete(item);
     else novo.add(item);
     aoMudar(novo);
+  }
+
+  function adicionarJanelaCustom() {
+    const n = Number(janelaCustom);
+    if (Number.isFinite(n) && n > 0) {
+      setJanelas((atual) => new Set(atual).add(n));
+      setJanelaCustom("");
+    }
   }
 
   async function aoEnviarPainel(arquivo: File, nome: string) {
@@ -155,16 +169,12 @@ export default function FeatureLabPagina() {
 
   async function aoRodarEsfera1() {
     if (!base) return;
-    const janelas = janelasTexto
-      .split(",")
-      .map((s) => Number(s.trim()))
-      .filter((n) => Number.isFinite(n) && n > 0);
     if (colunasValor.size === 0) {
       setErro("Selecione ao menos uma coluna de valor.");
       return;
     }
-    if (janelas.length === 0) {
-      setErro("Informe ao menos uma janela válida (ex.: 3,6).");
+    if (janelas.size === 0) {
+      setErro("Selecione ao menos uma janela.");
       return;
     }
 
@@ -177,7 +187,8 @@ export default function FeatureLabPagina() {
         chave,
         coluna_tempo: colunaTempo,
         colunas_valor: [...colunasValor],
-        janelas,
+        janelas: [...janelas].sort((a, b) => a - b),
+        coluna_y: colunaY,
       });
       setResultadoEsfera1(r);
       setColunasX(new Set(r.colunas_geradas));
@@ -205,6 +216,7 @@ export default function FeatureLabPagina() {
       max_suporte: maxSuporte,
       max_regras: maxRegras,
       permitir_cruzamento_entre_bases: permitirCruzamento,
+      coluna_y: colunaY,
     };
     try {
       let r: ResultadoFeatureLab;
@@ -214,7 +226,7 @@ export default function FeatureLabPagina() {
       } else if (base.tipo === "flat") {
         r = await rodarDireto({ dataset: base.nome, colunas_x: [...colunasX], ...parametros });
       } else {
-        const bruta = await carregarBaseBruta(base.nome, base.tipo);
+        const bruta = await carregarBaseBruta(base.nome, base.tipo, colunaY);
         r = await descobrirEmTabela({ tabela: bruta.tabela, colunas_x: [...colunasX], ...parametros });
       }
       setResultado(r);
@@ -272,7 +284,14 @@ export default function FeatureLabPagina() {
 
   return (
     <div className="flex h-screen">
-      <SidebarFeatureLab bases={bases} base={base} aoMudarBase={setBase} aoEnviarPainel={aoEnviarPainel} />
+      <SidebarFeatureLab
+        bases={bases}
+        base={base}
+        aoMudarBase={setBase}
+        aoEnviarPainel={aoEnviarPainel}
+        colunaY={colunaY}
+        aoMudarColunaY={setColunaY}
+      />
 
       <main className="flex-1 overflow-y-auto p-6">
         <header className="mb-6 flex items-center justify-between">
@@ -372,16 +391,55 @@ export default function FeatureLabPagina() {
                     </div>
                   </div>
                   <div>
-                    <label className="mb-1 block text-[11px] text-slate-500">
-                      janelas (períodos, separadas por vírgula)
-                    </label>
-                    <input
-                      type="text"
-                      value={janelasTexto}
-                      onChange={(e) => setJanelasTexto(e.target.value)}
-                      placeholder="3,6,12"
-                      className="w-32 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-                    />
+                    <p className="mb-1.5 text-[11px] text-slate-500">janelas (períodos)</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {JANELAS_COMUNS.map((n) => (
+                        <label
+                          key={n}
+                          className="flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={janelas.has(n)}
+                            onChange={() => alternar(janelas, n, setJanelas)}
+                            className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+                          />
+                          M{n}
+                        </label>
+                      ))}
+                      {[...janelas]
+                        .filter((n) => !JANELAS_COMUNS.includes(n))
+                        .sort((a, b) => a - b)
+                        .map((n) => (
+                          <button
+                            key={n}
+                            onClick={() => alternar(janelas, n, setJanelas)}
+                            className="rounded-full border border-emerald-700 bg-emerald-950/40 px-2.5 py-1 text-xs text-emerald-300"
+                          >
+                            M{n} ×
+                          </button>
+                        ))}
+                      <input
+                        type="number"
+                        min={1}
+                        value={janelaCustom}
+                        onChange={(e) => setJanelaCustom(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            adicionarJanelaCustom();
+                          }
+                        }}
+                        placeholder="outra"
+                        className="w-20 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1 text-xs text-slate-100"
+                      />
+                      <button
+                        onClick={adicionarJanelaCustom}
+                        className="rounded-lg border border-slate-600 px-2 py-1 text-xs text-slate-300 hover:border-emerald-700 hover:text-emerald-400"
+                      >
+                        + adicionar
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <button

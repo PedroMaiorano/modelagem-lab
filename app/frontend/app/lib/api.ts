@@ -401,6 +401,7 @@ export interface ConfigAgregacao {
   coluna_tempo: string;
   colunas_valor: string[];
   janelas: number[];
+  coluna_y: string;
 }
 
 export interface ResultadoAgregacao {
@@ -427,6 +428,7 @@ export interface ParametrosEsfera2 {
   max_suporte: number;
   max_regras: number;
   permitir_cruzamento_entre_bases: boolean;
+  coluna_y: string;
 }
 
 export interface ConfigDescobrir extends ParametrosEsfera2 {
@@ -465,8 +467,10 @@ export async function listarBasesFeatureLab(): Promise<BaseFeatureLab[]> {
   return resp.json();
 }
 
-export async function buscarInfoPainel(nome: string): Promise<InfoPainel> {
-  const resp = await fetch(`${URL_API}/api/feature-lab/paineis/${encodeURIComponent(nome)}/info`);
+export async function buscarInfoPainel(nome: string, colunaY: string = "y"): Promise<InfoPainel> {
+  const resp = await fetch(
+    `${URL_API}/api/feature-lab/paineis/${encodeURIComponent(nome)}/info?coluna_y=${encodeURIComponent(colunaY)}`,
+  );
   if (!resp.ok) throw new Error(`Falha ao buscar info do painel (${resp.status})`);
   return resp.json();
 }
@@ -485,9 +489,13 @@ export async function uploadPainel(arquivo: File, nome: string): Promise<Respost
 
 /** Carrega uma base sem passar pela esfera 1 — caminho pro toggle de
  * agregação desligado, mesmo numa base tipo painel. */
-export async function carregarBaseBruta(base: string, tipo: "painel" | "flat"): Promise<BaseBruta> {
+export async function carregarBaseBruta(
+  base: string,
+  tipo: "painel" | "flat",
+  colunaY: string = "y",
+): Promise<BaseBruta> {
   const resp = await fetch(
-    `${URL_API}/api/feature-lab/base-bruta?base=${encodeURIComponent(base)}&tipo=${tipo}`,
+    `${URL_API}/api/feature-lab/base-bruta?base=${encodeURIComponent(base)}&tipo=${tipo}&coluna_y=${encodeURIComponent(colunaY)}`,
   );
   if (!resp.ok) {
     const corpo = await resp.json().catch(() => null);

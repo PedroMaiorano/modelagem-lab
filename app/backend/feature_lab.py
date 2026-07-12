@@ -67,7 +67,7 @@ def listar_bases() -> list[dict[str, str]]:
     return bases
 
 
-def info_painel(nome: str) -> dict[str, Any]:
+def info_painel(nome: str, coluna_y: str = "y") -> dict[str, Any]:
     caminho = DIR_PAINEIS / nome / "painel.csv"
     if not caminho.exists():
         raise ValueError(f"Painel '{nome}' não encontrado")
@@ -87,7 +87,8 @@ def info_painel(nome: str) -> dict[str, Any]:
     # chave/tempo continuava marcado). Coluna de texto (chave, safra em
     # formato "2024-01" etc.) não entra num classificador numérico de
     # qualquer forma, então o filtro certo é por tipo, não por seleção.
-    colunas_numericas = [c for c in colunas if c != "y" and pd.api.types.is_numeric_dtype(df[c])]
+    # `coluna_y` também sai daqui -- nunca é candidata a feature de si mesma.
+    colunas_numericas = [c for c in colunas if c != coluna_y and pd.api.types.is_numeric_dtype(df[c])]
 
     return {
         "colunas": colunas,
@@ -135,24 +136,27 @@ def _carregar_tabela_base(base: str, tipo: Literal["painel", "flat"]) -> tuple[p
     return pd.concat([df_dev, df_teste], ignore_index=True), None
 
 
-def carregar_base_bruta(base: str, tipo: Literal["painel", "flat"]) -> dict[str, Any]:
+def carregar_base_bruta(base: str, tipo: Literal["painel", "flat"], coluna_y: str = "y") -> dict[str, Any]:
     """Carrega a base sem passar pela esfera 1 -- caminho pro toggle de
     agregação desligado mesmo numa base tipo painel (cada usuário decide,
     não é travado pelo tipo). Devolve como registros, no mesmo formato que
-    `descobrir_em_tabela` espera.
+    `descobrir_em_tabela` espera. `coluna_y` é renomeada pra "y" aqui dentro
+    -- o resto do código sempre trabalha com o nome interno fixo.
 
-    Base painel sem coluna `y` própria (comum -- o alvo geralmente vive só
-    no ponto de observação agregado, não em cada linha do histórico bruto)
-    levanta erro claro em vez de silenciosamente não achar o alvo: sem
-    rodar a esfera 1 primeiro, não tem como saber qual linha do histórico
-    de cada chave é "a" observação a associar ao `y`.
+    Base painel sem a coluna resposta nas linhas brutas (comum -- o alvo
+    geralmente vive só no ponto de observação agregado, não em cada linha
+    do histórico bruto) levanta erro claro em vez de silenciosamente não
+    achar o alvo: sem rodar a esfera 1 primeiro, não tem como saber qual
+    linha do histórico de cada chave é "a" observação a associar ao alvo.
     """
     df, caminho_alvo = _carregar_tabela_base(base, tipo)
-    if "y" not in df.columns:
+    if coluna_y not in df.columns:
         raise ValueError(
-            f"Base '{base}' não tem coluna 'y' nas linhas brutas -- rode a esfera 1 primeiro "
+            f"Base '{base}' não tem coluna '{coluna_y}' nas linhas brutas -- rode a esfera 1 primeiro "
             "(o alvo normalmente só existe no ponto de observação agregado, não no histórico bruto)"
         )
+    if coluna_y != "y":
+        df = df.rename(columns={coluna_y: "y"})
     return {"tabela": df.to_dict(orient="records"), "colunas": list(df.columns), "n_linhas": len(df)}
 
 
@@ -163,12 +167,15 @@ def agregar_base(
     coluna_tempo: str,
     colunas_valor: list[str],
     janelas: list[int],
+    coluna_y: str = "y",
 ) -> dict[str, Any]:
     """Esfera 1: roda `construir_agregados_janela` pra cada `colunas_valor` e
     reduz a uma linha por chave (último período). Devolve a tabela pronta
-    (com `y`), a lista de colunas geradas, e as contagens brutas (pra resumo
-    na interface). Funciona em cima de painel OU dataset flat -- a escolha
-    de chave/tempo é do usuário, não uma trava por tipo de base.
+    (com `y` -- `coluna_y` renomeada internamente, o resto do código sempre
+    trabalha com o nome fixo), a lista de colunas geradas, e as contagens
+    brutas (pra resumo na interface). Funciona em cima de painel OU dataset
+    flat -- a escolha de chave/tempo/resposta é do usuário, não uma trava
+    por tipo de base.
     """
     if not colunas_valor:
         raise ValueError("Selecione ao menos uma coluna de valor pra agregar")
@@ -198,10 +205,16 @@ def agregar_base(
 
     por_chave = agregado.groupby(chave, sort=False).tail(1).reset_index(drop=True)
 
-    if "y" not in por_chave.columns:
+    if coluna_y in por_chave.columns:
+        if coluna_y != "y":
+            por_chave = por_chave.rename(columns={coluna_y: "y"})
+    else:
         if caminho_alvo is None or not caminho_alvo.exists():
-            raise ValueError(f"Base '{base}' não tem coluna 'y' nem agregado.csv com o alvo")
-        alvo = pd.read_csv(caminho_alvo)[[chave, "y"]]
+            raise ValueError(f"Base '{base}' não tem coluna '{coluna_y}' nem agregado.csv com o alvo")
+        alvo_bruto = pd.read_csv(caminho_alvo)
+        if coluna_y not in alvo_bruto.columns:
+            raise ValueError(f"agregado.csv de '{base}' não tem coluna '{coluna_y}'")
+        alvo = alvo_bruto[[chave, coluna_y]].rename(columns={coluna_y: "y"})
         por_chave = por_chave.merge(alvo, on=chave, how="inner")
 
     return {
@@ -308,6 +321,7 @@ def rodar_agregacao(
     coluna_tempo: str,
     colunas_valor: list[str],
     janelas: list[int],
+    coluna_y: str = "y",
 ) -> dict[str, Any]:
     """Esfera 1 sozinha, empacotada pra API -- devolve a tabela resultante
     como registros (JSON-serializável) pra interface guardar e mandar de
@@ -317,7 +331,7 @@ def rodar_agregacao(
     colunas geradas quanto das originais (no último período de cada chave,
     que é o que sobra na tabela depois do `groupby().tail(1)`) -- pra dar
     pra comparar se agregar ajudou ou não."""
-    agregacao = agregar_base(base, tipo, chave, coluna_tempo, colunas_valor, janelas)
+    agregacao = agregar_base(base, tipo, chave, coluna_tempo, colunas_valor, janelas, coluna_y)
     tabela: pd.DataFrame = agregacao["tabela"]
     colunas_geradas: list[str] = agregacao["colunas_geradas"]
     tem_alvo = "y" in tabela.columns
@@ -345,16 +359,19 @@ def descobrir_em_tabela(
     max_regras: int = 10,
     permitir_cruzamento_entre_bases: bool = True,
     semente: int = 0,
+    coluna_y: str = "y",
 ) -> dict[str, Any]:
     """Esfera 2 sobre uma tabela já em mãos (tipicamente a saída de
     `rodar_agregacao`) -- reconstrói o DataFrame, faz o split dev/teste
     (aleatório, seedado) e roda `_descobrir`."""
     if not colunas_x:
         raise ValueError("Selecione ao menos uma coluna candidata")
-    if "y" not in (registros[0] if registros else {}):
-        raise ValueError("Tabela sem coluna 'y'")
+    if coluna_y not in (registros[0] if registros else {}):
+        raise ValueError(f"Tabela sem coluna '{coluna_y}'")
 
     df = pd.DataFrame.from_records(registros)
+    if coluna_y != "y":
+        df = df.rename(columns={coluna_y: "y"})
     rng_split = df.sample(frac=1, random_state=semente)
     metade = len(rng_split) // 2
     dev, teste = rng_split.iloc[:metade], rng_split.iloc[metade:]
@@ -383,6 +400,7 @@ def rodar_direto(
     max_suporte: float = 0.5,
     max_regras: int = 10,
     permitir_cruzamento_entre_bases: bool = True,
+    coluna_y: str = "y",
 ) -> dict[str, Any]:
     """Modo direto: pula a esfera 1 -- usa um dataset já flat (mesmo
     dev.csv/teste.csv do Pedro_Wise, já com split dev/teste pronto) direto
@@ -393,9 +411,12 @@ def rodar_direto(
         raise ValueError("Selecione ao menos uma coluna candidata")
 
     df_dev, df_teste = carregar_dataset(dataset)
-    faltando = [c for c in [*colunas_x, "y"] if c not in df_dev.columns]
+    faltando = [c for c in [*colunas_x, coluna_y] if c not in df_dev.columns]
     if faltando:
         raise ValueError(f"Coluna(s) ausente(s) no dataset: {faltando}")
+    if coluna_y != "y":
+        df_dev = df_dev.rename(columns={coluna_y: "y"})
+        df_teste = df_teste.rename(columns={coluna_y: "y"})
 
     return _descobrir(
         df_dev[colunas_x],

@@ -398,19 +398,21 @@ def rota_listar_paineis() -> list[str]:
 
 
 @app.get("/api/feature-lab/paineis/{nome}/info")
-def rota_info_painel(nome: str) -> dict[str, Any]:
+def rota_info_painel(nome: str, coluna_y: str = "y") -> dict[str, Any]:
     try:
-        return info_painel(nome)
+        return info_painel(nome, coluna_y)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @app.get("/api/feature-lab/base-bruta")
-def rota_carregar_base_bruta(base: str, tipo: Literal["painel", "flat"]) -> dict[str, Any]:
+def rota_carregar_base_bruta(
+    base: str, tipo: Literal["painel", "flat"], coluna_y: str = "y"
+) -> dict[str, Any]:
     """Carrega a base sem passar pela esfera 1 -- pro toggle de agregação
     desligado, mesmo numa base tipo painel."""
     try:
-        return carregar_base_bruta(base, tipo)
+        return carregar_base_bruta(base, tipo, coluna_y)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -437,6 +439,7 @@ class ConfigAgregacao(BaseModel):
     coluna_tempo: str
     colunas_valor: list[str]
     janelas: list[int] = [3]
+    coluna_y: str = "y"
 
 
 @app.post("/api/feature-lab/agregacao")
@@ -451,6 +454,7 @@ def rota_rodar_agregacao(config: ConfigAgregacao) -> dict[str, Any]:
             coluna_tempo=config.coluna_tempo,
             colunas_valor=config.colunas_valor,
             janelas=config.janelas,
+            coluna_y=config.coluna_y,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -465,6 +469,7 @@ class ConfigDescobrir(BaseModel):
     max_suporte: float = 0.5
     max_regras: int = 10
     permitir_cruzamento_entre_bases: bool = True
+    coluna_y: str = "y"
 
 
 @app.post("/api/feature-lab/descobrir")
@@ -481,6 +486,7 @@ def rota_descobrir_em_tabela(config: ConfigDescobrir) -> dict[str, Any]:
             max_suporte=config.max_suporte,
             max_regras=config.max_regras,
             permitir_cruzamento_entre_bases=config.permitir_cruzamento_entre_bases,
+            coluna_y=config.coluna_y,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -495,6 +501,7 @@ class ConfigDireto(BaseModel):
     max_suporte: float = 0.5
     max_regras: int = 10
     permitir_cruzamento_entre_bases: bool = True
+    coluna_y: str = "y"
 
 
 @app.post("/api/feature-lab/direto")
@@ -511,6 +518,7 @@ def rota_rodar_direto(config: ConfigDireto) -> dict[str, Any]:
             max_suporte=config.max_suporte,
             max_regras=config.max_regras,
             permitir_cruzamento_entre_bases=config.permitir_cruzamento_entre_bases,
+            coluna_y=config.coluna_y,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
