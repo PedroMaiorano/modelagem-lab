@@ -1,0 +1,398 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=2.3cm]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazilian]{babel}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+
+\definecolor{codebg}{RGB}{245,245,245}
+\usepackage{listings}
+\lstset{
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  columns=fullflexible,
+  showstringspaces=false,
+}
+
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue}
+\setlength{\parskip}{0.6em}
+\setlength{\parindent}{0pt}
+
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\title{\texttt{pipeline\_lab} --- Referência Completa\\
+\large Funções, parâmetros e fundamentação na literatura}
+\author{modelagem-lab}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent Este documento cataloga toda função pública de \texttt{pipeline\_lab}
+(\url{python/pipeline_lab/} no repositório), seus parâmetros, e a passagem de
+literatura que justifica cada decisão de design relevante. A biblioteca é uma
+coleção de funções soltas (não uma API fluente) para montar o funil de
+modelagem de risco de crédito --- divisão, construção de variáveis, agregação
+temporal, descoberta de interação, categorização/WOE, pré-seleção e a busca
+stepwise Pedro\_Wise --- em cima de um \texttt{pandas.DataFrame} qualquer, sem
+depender de disco ou de um servidor web. As citações vêm da base de
+literatura já curada em \texttt{docs/literatura/} do repositório.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Filosofia e convenções}
+
+\texttt{pipeline\_lab} é uma coleção de \textbf{funções soltas}, não uma API
+orientada a objeto: cada etapa recebe DataFrames e devolve DataFrames novos,
+nunca muta o original, nunca lê ou escreve em disco. Isso permite plugar um
+\texttt{DataFrame} qualquer e escolher só os módulos que fazem sentido para o
+caso de uso, na ordem:
+
+\begin{lstlisting}
+divisao -> construcao (opcional) -> esfera1 (opcional)
+        -> esfera2 (opcional) -> categorizar
+        -> preselecao (opcional) -> treinamento
+\end{lstlisting}
+
+\textbf{Convenção de coluna-alvo.} A partir de \texttt{divisao}, a variável
+resposta deve se chamar \texttt{"y"} em \texttt{df\_dev}/\texttt{df\_teste} ---
+todas as etapas seguintes acessam \texttt{df["y"]} diretamente.
+\texttt{dividir\_por\_amostra}/\texttt{dividir\_aleatorio} aceitam
+\texttt{coluna\_y} para fazer esse rename automaticamente.
+
+\textbf{Anti-leakage por construção.} Toda etapa que "ajusta" algo a partir de
+\texttt{y} (WOE, tabela de bins monotônicos, regras de interação) faz isso só
+em dev, e reaplica a mesma tabela/regra em teste sem reajustar --- nunca
+recalcula usando o \texttt{y} de teste. É o mesmo padrão \emph{fit/transform}
+do scikit-learn.
+
+\textbf{Convenção de "base".} Uma variável crua pode ter várias versões
+(\texttt{idade\_woe}, \texttt{idade\_log}, \texttt{idade\_bin}) --- todas
+compartilham o mesmo prefixo semântico ("base"). O Pedro\_Wise nunca deixa
+duas versões da mesma base coexistirem no modelo final.
+
+\section{\texttt{divisao}}
+
+Divide um DataFrame em \texttt{(df\_dev, df\_teste)}. Sempre o primeiro passo.
+
+\subsection*{\texttt{dividir\_por\_amostra(df, coluna\_amostra, valores\_dev, valores\_teste, coluna\_y=None)}}
+
+Split por uma coluna de amostra que já existe no dataframe --- não assume
+nomes fixos: você diz quais rótulos contam como dev e quais contam como
+teste.
+
+\begin{longtable}{P{3.2cm}P{2cm}P{2cm}P{7.5cm}}
+\toprule
+\textbf{Parâmetro} & \textbf{Tipo} & \textbf{Default} & \textbf{Explicação} \\
+\midrule
+\endhead
+\texttt{df} & DataFrame & --- & Dataframe completo, ainda não dividido. \\
+\texttt{coluna\_amostra} & str & --- & Coluna que identifica a amostra de cada linha (ex.\ \texttt{"split"}). Valores livres --- \texttt{"DES"/"OOT"}, \texttt{"train"/"val"}, o que já vier na fonte. \\
+\texttt{valores\_dev} & list[str] & --- & Quais valores contam como desenvolvimento. \\
+\texttt{valores\_teste} & list[str] & --- & Quais valores contam como teste. Linhas fora das duas listas são descartadas. \\
+\texttt{coluna\_y} & str\,|\,None & None & Se passado, renomeia essa coluna para \texttt{"y"} antes de dividir. \\
+\bottomrule
+\end{longtable}
+
+\subsection*{\texttt{dividir\_aleatorio(df, proporcao\_teste=0.5, semente=42, coluna\_y=None)}}
+
+Split aleatório simples --- embaralha e corta.
+
+\begin{longtable}{P{3.2cm}P{2cm}P{2cm}P{7.5cm}}
+\toprule
+\textbf{Parâmetro} & \textbf{Tipo} & \textbf{Default} & \textbf{Explicação} \\
+\midrule
+\endhead
+\texttt{proporcao\_teste} & float & 0.5 & Fração das linhas que vai para teste. \\
+\texttt{semente} & int & 42 & \texttt{random\_state} --- reprodutibilidade. \\
+\texttt{coluna\_y} & str\,|\,None & None & Ver acima. \\
+\bottomrule
+\end{longtable}
+
+\section{\texttt{construcao}}
+
+Razões e diferenças interpretáveis entre pares de variáveis relacionadas ---
+ex.\ \texttt{pago / fatura} = "proporção paga da fatura", uma feature de
+negócio óbvia que não existe nas colunas originais.
+
+Escopo deliberadamente mínimo: não é busca automática tipo Deep Feature
+Synthesis ou programação genética. A escolha de v1 foi gerar candidatas
+simples e interpretáveis primeiro --- mais barato e testável imediatamente
+contra o Pedro\_Wise --- em vez da escola "automática/exaustiva" descrita no
+paper fundador de Kanter \& Veeramachaneni (2015), \emph{Deep
+Feature Synthesis: Towards automating data science endeavors}, que aplica
+operações de agregação recursivamente sobre relações entre tabelas (base da
+biblioteca \texttt{featuretools}).
+
+Um paralelo direto em crédito: Dumitrescu et al.\ (2021), \emph{Machine
+learning for credit scoring: Improving logistic regression with non-linear
+decision-tree effects}, usa efeitos extraídos de árvores como features
+construídas de volta para uma regressão logística --- o mesmo espírito de
+"construção assistida" que \texttt{esfera2} (RuleFit-style) aplica depois de
+\texttt{construcao} no funil.
+
+\begin{longtable}{P{4cm}P{9.5cm}}
+\toprule
+\textbf{Função} & \textbf{Assinatura e parâmetros} \\
+\midrule
+\endhead
+\texttt{construir\_razao} &
+\texttt{(numerador, denominador, nome, epsilon=1e-6)} --- \texttt{epsilon}
+substitui denominador exatamente zero (mantém o sinal no resto, só evita
+divisão por zero literal); comum em variáveis monetárias reais. \\[0.4em]
+\texttt{construir\_diferenca} &
+\texttt{(a, b, nome)} --- \texttt{a - b}, útil para variáveis na mesma
+unidade (ex.\ variação de fatura mês a mês). \\[0.4em]
+\texttt{construir\_razoes\_em\_lote} &
+\texttt{(df, pares, epsilon=1e-6)} --- \texttt{pares} é uma lista de
+\texttt{(numerador, denominador, nome)}, aplica \texttt{construir\_razao}
+para cada tripla. Retorna só as colunas construídas. \\
+\bottomrule
+\end{longtable}
+
+\section{\texttt{esfera1} --- agregação temporal}
+
+Agregação "comportamental" (behavioral scoring): a partir de um painel
+(chave + tempo + variável observada mês a mês), constrói primitivas de
+janela móvel (máximo, média, mínimo, desvio-padrão, tendência) e devolve
+uma linha por chave.
+
+Catálogo de primitivas inspirado no vocabulário de agregação do Deep
+Feature Synthesis (Kanter \& Veeramachaneni, 2015) --- sem
+adotar a biblioteca inteira, só o vocabulário relevante para painéis de
+crédito mensal.
+
+\textbf{Garantia sem look-ahead}: cada linha de saída usa só observações até
+e incluindo o próprio período --- nunca dados futuros da mesma chave.
+
+\textbf{Preservação de split}: \texttt{aplicar} agrega \texttt{df\_dev} e
+\texttt{df\_teste} \emph{separadamente} --- nunca junta as duas bases para
+agregar e depois redividir, o que contaminaria a fronteira temporal do
+split.
+
+\begin{longtable}{P{4cm}P{9.5cm}}
+\toprule
+\textbf{Função} & \textbf{Assinatura e parâmetros} \\
+\midrule
+\endhead
+\texttt{agregar} &
+\texttt{(df, chave, coluna\_tempo, colunas\_valor, janelas)} --- core de
+agregação sem split, uma chamada por base. \texttt{chave} identifica a
+entidade; \texttt{coluna\_tempo} deve ser ordenável por chave;
+\texttt{colunas\_valor} são as colunas numéricas agregadas;
+\texttt{janelas} é uma lista de tamanhos de janela móvel em períodos
+(ex.\ \texttt{[3, 6, 12]}). Retorna \texttt{(df\_agregado, colunas\_geradas)}. \\[0.4em]
+\texttt{aplicar} &
+\texttt{(df\_dev, df\_teste, chave, coluna\_tempo, colunas\_valor, janelas)}
+--- chama \texttt{agregar} separadamente em dev e teste. Retorna
+\texttt{(df\_dev\_agregado, df\_teste\_agregado, colunas\_geradas)}. \\
+\bottomrule
+\end{longtable}
+
+\section{\texttt{esfera2} --- descoberta de interação}
+
+Descoberta de interação RuleFit-style (Friedman \& Popescu, 2008,
+\emph{Predictive learning via rule ensembles},
+\emph{Annals of Applied Statistics}): treina um ensemble de árvores rasas
+(\texttt{GradientBoostingClassifier}) sobre as candidatas já construídas,
+extrai os caminhos raiz-folha como regras de interação (ex.\ "tendência
+alta E severidade alta"), e devolve as regras como candidatas avaliáveis
+para o funil.
+
+\textbf{Diferença deliberada do RuleFit original}: no paper, as regras
+extraídas viram termos de uma regressão com penalização L1 (Lasso) que
+decide os pesos finais. Aqui as regras viram colunas 0/1 que entram no funil
+normal --- quem decide o que fica no modelo final continua sendo a busca
+stepwise do Pedro\_Wise, não uma regressão L1 própria.
+
+\subsection*{\texttt{transformar\_categoricas\_woe(dev, teste, colunas\_x, colunas\_categoricas=None)}}
+
+O \texttt{GradientBoostingClassifier} só aceita entrada numérica, então
+colunas categóricas são WOE-codificadas antes de entrar na árvore. Colunas
+de texto em \texttt{colunas\_x} são tratadas como categóricas
+automaticamente. É um encoding "ingênuo" (sem regularização/shrinkage) ---
+Pargent, Pfisterer, Thomas \& Bischl (2022), \emph{Regularized target
+encoding outperforms traditional methods...}, mostra que versões
+regularizadas de target encoding superam a versão ingênua, que pode vazar
+informação do target e overfittar; ponto de atenção registrado, ainda não
+implementado aqui (o WOE final que o modelo vê é ajustado só em dev, o
+mesmo cuidado anti-leakage do resto do lab).
+
+\subsection*{\texttt{aplicar(df\_dev, df\_teste, ...)}}
+
+\begin{longtable}{P{4cm}P{2cm}P{1.6cm}P{6.5cm}}
+\toprule
+\textbf{Parâmetro} & \textbf{Tipo} & \textbf{Default} & \textbf{Explicação} \\
+\midrule
+\endhead
+\texttt{colunas\_categoricas} & list[str]\,|\,None & None & Ver \texttt{transformar\_categoricas\_woe}. \\
+\texttt{profundidade\_maxima} & int & 2 & Profundidade das árvores --- controla o tamanho máximo de uma regra (nº de condições). \\
+\texttt{n\_arvores} & int & 60 & Nº de árvores no GBM --- mais árvores, mais candidatas de regra antes da deduplicação/filtro. \\
+\texttt{min\_suporte} & float & 0.02 & Suporte mínimo (fração de linhas que satisfaz a regra) --- descarta regras quase nunca verdadeiras. \\
+\texttt{max\_suporte} & float & 0.5 & Suporte máximo --- descarta regras quase sempre verdadeiras (constante disfarçada). \\
+\texttt{max\_regras} & int & 10 & Teto de regras devolvidas após os filtros. \\
+\texttt{permitir\_cruzamento\_entre\_bases} & bool & True & Se False, restringe regras a combinarem só primitivas da mesma variável bruta --- útil quando não se quer misturar domínios numa condição só. \\
+\texttt{proporcao\_variaveis\_por\_split} & float\,|\,None & None & Fração de variáveis candidatas por split (equivalente a \texttt{max\_features} do sklearn) --- diversifica as regras extraídas. \\
+\texttt{iv\_minimo} & float & 0.02 & Só regras com IV de \emph{teste} $\geq$ esse valor viram coluna --- nunca o IV de dev, que já foi usado para escolher a regra e está inflado por construção. \\
+\bottomrule
+\end{longtable}
+
+Retorna \texttt{(df\_dev, df\_teste, colunas\_geradas)}.
+
+\section{\texttt{categorizar} --- binning + WOE}
+
+Sempre a última etapa antes da pré-seleção/treinamento --- é aqui que as
+versões alternativas de cada variável (\texttt{\_woe}, \texttt{\_log},
+\texttt{\_bin}) nascem. Esfera 2 vem antes justamente porque essas
+transformações ainda não existem naquele ponto do funil.
+
+\subsection*{\texttt{categorizar\_e\_transformar(df\_dev, df\_teste, gerar\_transformacoes\_potencia=True, gerar\_bin\_ordinal=True, ao\_processar\_coluna=None)}}
+
+Para cada coluna (exceto \texttt{y}):
+
+\begin{itemize}[leftmargin=1.2cm]
+\item \textbf{Numérica contínua} (\texttt{nunique > 2}): binning monotônico
+primeiro (\texttt{bins\_monotonicos} --- merge guloso que força a taxa de
+evento a ser monotônica entre bins adjacentes; versão pragmática, não ótima
+via MIP, da ideia central do OptBinning ---
+Navas-Palencia, 2020,
+\emph{Optimal binning: mathematical programming formulation},
+hoje o padrão prático de mercado para binning em crédito).
+\item \textbf{Categórica/binária} (texto, ou numérica com só 2 valores ---
+ex.\ uma flag 0/1 de regra da Esfera 2): sem binning, cada valor já é o
+"bin". \emph{Bug real corrigido}: colunas binárias eram descartadas
+silenciosamente aqui antes da correção de 2026-07 (\texttt{bins\_monotonicos}
+numa coluna de 2 valores gera só 2 edges, insuficiente para discretizar).
+\end{itemize}
+
+Depois do binning: \texttt{ajustar\_woe} (Siddiqi, \emph{Credit Risk
+Scorecards} --- convenção de sinal $\mathrm{WOE} = \ln(\%\text{não-evento} /
+\%\text{evento})$, positivo quando o bin tem mais "bons pagadores" relativo
+à distribuição total) ajustado só em dev, reaplicado em teste.
+
+\begin{longtable}{P{4.2cm}P{2cm}P{1.6cm}P{6cm}}
+\toprule
+\textbf{Parâmetro} & \textbf{Tipo} & \textbf{Default} & \textbf{Explicação} \\
+\midrule
+\endhead
+\texttt{gerar\_transformacoes\_potencia} & bool & True & Gera também log/raiz/quad/cubo/inversas como candidatas extras --- o Pedro\_Wise testa trocar a versão WOE por uma dessas via a semântica de "base". Só numérica contínua; descarta transformações com domínio inválido. Análogo em espírito a Box--Cox/Yeo--Johnson (Atkinson, Riani \& Corbellini, 2021). \\
+\texttt{gerar\_bin\_ordinal} & bool & True & Gera também o índice do bin (faixa) como candidata extra --- outra "versão" da mesma base. \\
+\texttt{ao\_processar\_coluna} & Callable\,|\,None & None & Callback \texttt{(coluna, iv)} chamado após cada coluna processada --- gancho de progresso em tempo real, sem a biblioteca precisar saber o que é uma fila/WebSocket. \\
+\bottomrule
+\end{longtable}
+
+Retorna \texttt{(woe\_dev, woe\_teste, iv\_por\_variavel)}.
+
+\section{\texttt{preselecao}}
+
+Reduz o volume de candidatas antes do Pedro\_Wise. Motivação: depois que
+Construção e as transformações de potência de \texttt{categorizar} geram
+dezenas/centenas de colunas extras por variável-base, o volume pode
+explodir --- mais lento e maior risco de selecionar ruído por acaso (o
+problema de múltiplos testes, o mesmo pano de fundo da literatura de
+\emph{stability selection}: Meinshausen \& B\"uhlmann, 2008/2010,
+\emph{Stability Selection}, JRSS-B).
+
+Três filtros em sequência, cada um opcional (\texttt{limiar=None} pula):
+
+\begin{longtable}{P{4cm}P{9.5cm}}
+\toprule
+\textbf{Função} & \textbf{Parâmetros e explicação} \\
+\midrule
+\endhead
+\texttt{filtrar\_variancia(df, colunas, limiar=1e-6)} &
+Mantém colunas com variância $>$ \texttt{limiar} --- descarta
+quase-constantes, comuns entre transformações de potência quando a
+variável original tem pouca variação. \\[0.4em]
+\texttt{filtrar\_iv(colunas, iv\_por\_base, limiar=0.02)} &
+Mantém colunas cuja variável-base tem IV $\geq$ \texttt{limiar}. Bases sem
+entrada em \texttt{iv\_por\_base} são tratadas como IV=0 (descartadas). \\[0.4em]
+\texttt{filtrar\_correlacao(df, colunas, iv\_por\_base, limiar=0.9)} &
+Entre pares com $|r| \geq$ \texttt{limiar}, mantém o de maior IV.
+\textbf{Pares da mesma base são ignorados de propósito} --- filtrar aqui
+colapsaria a família inteira num só sobrevivente antes do Pedro\_Wise
+escolher a melhor versão. \\[0.4em]
+\texttt{pre\_selecionar(df, iv\_por\_base, limiar\_variancia=1e-6, limiar\_iv=0.02, limiar\_correlacao=0.9)} &
+Aplica os 3 filtros em sequência. Retorna \texttt{colunas\_mantidas},
+contagens em cada etapa do funil, e pares descartados por correlação. \\
+\bottomrule
+\end{longtable}
+
+Este design --- filtrar correlação entre bases diferentes, nunca dentro da
+mesma base --- evita o modo de falha descrito por Faletto \& Bien (2022),
+\emph{Cluster Stability Selection}: quando há
+proxies altamente correlacionados de um fator latente, um filtro de
+correlação ingênuo pode escolher arbitrariamente um proxy e nunca convergir
+no correto. A distinção "mesma base nunca filtra, base diferente filtra" é
+a fronteira que evita esse problema por construção.
+
+\section{\texttt{treinamento} --- Pedro\_Wise}
+
+O "famigerado" Pedro\_Wise --- busca greedy multi-nível (forward/backward,
+níveis 1 a 3) sobre GLM binomial (logística), otimizando KS (estatística de
+Kolmogorov--Smirnov entre a distribuição de score de eventos e
+não-eventos). Port fiel de um script R original, validado numericamente
+contra o R (KS-dev bate em 10 casas decimais).
+
+\subsection*{\texttt{treinar(df\_dev, df\_teste, ...)}}
+
+Todas as colunas de \texttt{df\_dev}/\texttt{df\_teste} exceto \texttt{y}
+são candidatas.
+
+\begin{longtable}{P{4.3cm}P{1.8cm}P{1.4cm}P{6.2cm}}
+\toprule
+\textbf{Parâmetro} & \textbf{Tipo} & \textbf{Default} & \textbf{Explicação} \\
+\midrule
+\endhead
+\texttt{criterio} & teste\,|\,dev\,|\,min & "teste" & \textbf{Não é cosmético} --- é o que forward/backward otimiza em toda a busca. O R original tem um bug que decide só por KS-dev; a validação do port mostrou que sob \texttt{criterio="dev"} o algoritmo aceita uma variável de puro ruído por acaso amostral. \texttt{"teste"} é o default recomendado para uso real. \\
+\texttt{shadow\_probing} & bool & False & Reservado para um critério de parada alternativo (backlog) inspirado em Thomas, Hepp, Mayr \& Bischl (2017), \emph{Probing for Sparse and Fast Variable Selection with Model-Based Boosting}: aumentar as candidatas com cópias permutadas ("shadow variables") e parar quando uma shadow seria selecionada --- sinal de ajuste a ruído, sem precisar separar dev/teste para decidir o ponto de parada. \\
+\texttt{forward\_simples} & bool & True & Nível 1: testa adicionar cada variável fora do modelo, uma por vez. \\
+\texttt{transformacao\_simples\_nivel1} & bool & True & Nível 1: troca a versão de uma base já no modelo por outra versão da mesma base. \\
+\texttt{backward\_simples\_nivel1} & bool & True & Nível 1: remove uma variável por vez, se o KS melhora. \\
+\texttt{min\_vars\_para\_backward} & int & 5 & Backward só é tentado acima desse número de variáveis no modelo. \\
+\texttt{forward\_duplo} & bool & True & Nível 2: testa pares de variáveis do top-\texttt{n\_best\_duplo} do forward simples --- pega sinergias que forward variável-a-variável não descobre sozinho. \\
+\texttt{forward\_triplo} & bool & True & Nível 2.5: combina top-\texttt{n\_best\_triplo\_1} $\times$ \texttt{n\_best\_triplo\_2} do forward duplo em triplas. \\
+\texttt{transformacao\_simples\_nivel2} & bool & True & Mesma troca de versão de base, repetida no nível 2. \\
+\texttt{backward\_simples\_nivel2} & bool & True & Mesmo backward, repetido no nível 2. \\
+\texttt{n\_best\_duplo} & int & 5 & Quantas variáveis do forward simples entram na busca de pares. \\
+\texttt{n\_best\_triplo\_1}, \texttt{n\_best\_triplo\_2} & int & 3, 3 & Quantas variáveis de cada lado entram na busca de triplas. \\
+\texttt{nivel3\_ativado} & bool & False & Ativa o backward complexo (nível 3): remove e re-roda o Pedro\_Wise inteiro a partir dali (recursão). Maior custo/risco combinatorial. \\
+\texttt{n\_best\_backward} & int & 2 & Quantas variáveis avalia para remoção no nível 3. \\
+\texttt{profundidade\_maxima\_nivel3} & int & 2 & Limite de profundidade da recursão do nível 3. \\
+\texttt{p\_valor\_maximo} & float\,|\,None & None & Filtro opcional de significância --- não é o critério de seleção (o Pedro\_Wise nunca usa p-valor para decidir, sempre KS). \\
+\bottomrule
+\end{longtable}
+
+Retorna \texttt{ResultadoTreinamento}: \texttt{variaveis}, \texttt{ks\_dev},
+\texttt{ks\_teste}, \texttt{auc\_teste}, \texttt{taxa\_evento\_dev},
+\texttt{taxa\_evento\_teste}, \texttt{coeficientes}, \texttt{estatisticas}
+(diagnóstico pós-hoc, não influencia a seleção), \texttt{tabela\_decis}.
+
+\section*{Bibliografia citada}
+\begin{itemize}[leftmargin=1cm]
+\item[] \label{friedman2008}\textbf{Friedman, J. H., \& Popescu, B. E.} (2008). \emph{Predictive learning via rule ensembles}. Annals of Applied Statistics. --- base de \texttt{esfera2}.
+\item[] \label{kanter2015}\textbf{Kanter, J. M., \& Veeramachaneni, K.} (2015). \emph{Deep feature synthesis: Towards automating data science endeavors}. --- vocabulário de primitivas de \texttt{construcao}/\texttt{esfera1}.
+\item[] \label{navaspalencia2020}\textbf{Navas-Palencia, G.} (2020). \emph{Optimal binning: mathematical programming formulation}. arXiv:2001.08025. --- inspiração de \texttt{bins\_monotonicos} em \texttt{categorizar}.
+\item[] \textbf{Siddiqi, N.} \emph{Credit Risk Scorecards}. --- convenção de WOE em \texttt{categorizar}.
+\item[] \label{meinshausen2010}\textbf{Meinshausen, N., \& Bühlmann, P.} (2008/2010). \emph{Stability Selection}. JRSS-B. --- motivação de \texttt{preselecao}.
+\item[] \label{faletto2022}\textbf{Faletto, G., \& Bien, J.} (2022). \emph{Cluster Stability Selection}. --- desenho de \texttt{filtrar\_correlacao} (exceção para mesma base).
+\item[] \label{thomas2017}\textbf{Thomas, J., Hepp, T., Mayr, A., \& Bischl, B.} (2017). \emph{Probing for Sparse and Fast Variable Selection with Model-Based Boosting}. Computational and Mathematical Methods in Medicine. --- \texttt{shadow\_probing} em \texttt{treinamento} (backlog).
+\item[] \label{pargent2022}\textbf{Pargent, F., Pfisterer, F., Thomas, J., \& Bischl, B.} (2022). \emph{Regularized target encoding outperforms traditional methods...} --- nota de cautela em \texttt{transformar\_categoricas\_woe}.
+\item[] \label{atkinson2021}\textbf{Atkinson, A. C., Riani, M., \& Corbellini, A.} (2021). \emph{The Box–Cox Transformation: Review and Extensions}. --- paralelo às transformações de potência de \texttt{categorizar}.
+\end{itemize}
+
+\vspace{1em}
+\noindent Ver \texttt{docs/literatura/} no repositório para a lista completa
+com links e sínteses mais longas por tópico.
+
+\end{document}
