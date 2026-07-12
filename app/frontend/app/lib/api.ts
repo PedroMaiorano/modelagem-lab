@@ -466,6 +466,43 @@ export interface ResultadoFeatureLab {
   tempo_execucao_segundos: number;
 }
 
+export interface ValorDistintoBase {
+  valor: string;
+  contagem: number;
+}
+
+export interface ConfigSplitFeatureLab {
+  metodo_split?: "aleatorio" | "coluna";
+  coluna_split?: string;
+  valores_dev?: string[];
+  valores_teste?: string[];
+}
+
+export interface ConfigRegressaoManual extends ConfigSplitFeatureLab {
+  tabela: Record<string, unknown>[];
+  colunas_x: string[];
+  coluna_y: string;
+}
+
+export interface EstatisticaCoeficiente {
+  coeficiente: number;
+  erro_padrao: number;
+  p_valor: number;
+}
+
+export interface ResultadoRegressaoManual {
+  coeficientes: Record<string, number>;
+  estatisticas: Record<string, EstatisticaCoeficiente>;
+  ks_dev: number;
+  ks_teste: number;
+  auc_teste: number;
+  n_dev: number;
+  n_teste: number;
+  taxa_evento_dev: number;
+  taxa_evento_teste: number;
+  tabela_decis: FaixaDecil[];
+}
+
 export async function listarBasesFeatureLab(): Promise<BaseFeatureLab[]> {
   const resp = await fetch(`${URL_API}/api/feature-lab/bases`);
   if (!resp.ok) throw new Error(`Falha ao listar bases (${resp.status})`);
@@ -548,6 +585,40 @@ export async function rodarDireto(config: ConfigDireto): Promise<ResultadoFeatur
   if (!resp.ok) {
     const corpo = await resp.json().catch(() => null);
     throw new Error(corpo?.detail ?? `Falha ao rodar (${resp.status})`);
+  }
+  return resp.json();
+}
+
+/** Valores distintos de uma coluna da base — pro seletor de split por
+ * amostra existente mostrar opções reais em vez de texto livre. */
+export async function buscarValoresDistintosBase(
+  base: string,
+  tipo: "painel" | "flat",
+  coluna: string,
+): Promise<ValorDistintoBase[]> {
+  const resp = await fetch(
+    `${URL_API}/api/feature-lab/valores-distintos?base=${encodeURIComponent(base)}&tipo=${tipo}&coluna=${encodeURIComponent(coluna)}`,
+  );
+  if (!resp.ok) {
+    const corpo = await resp.json().catch(() => null);
+    throw new Error(corpo?.detail ?? `Falha ao buscar valores distintos (${resp.status})`);
+  }
+  return resp.json();
+}
+
+/** Esfera 3: regressão logística manual, KS/AUC/coeficientes/curva de
+ * decis — mesmo núcleo do Pedro_Wise (LogisticGLM/KSGaussianMetric). */
+export async function rodarRegressaoManual(
+  config: ConfigRegressaoManual,
+): Promise<ResultadoRegressaoManual> {
+  const resp = await fetch(`${URL_API}/api/feature-lab/regressao-manual`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!resp.ok) {
+    const corpo = await resp.json().catch(() => null);
+    throw new Error(corpo?.detail ?? `Falha ao rodar regressão (${resp.status})`);
   }
   return resp.json();
 }

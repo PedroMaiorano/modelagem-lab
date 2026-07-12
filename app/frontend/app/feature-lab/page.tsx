@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import GraficoKS from "../components/GraficoKS";
 import SidebarFeatureLab from "../components/SidebarFeatureLab";
 import {
   buscarInfoPainel,
@@ -11,12 +12,14 @@ import {
   listarBasesFeatureLab,
   rodarAgregacao,
   rodarDireto,
+  rodarRegressaoManual,
   uploadPainel,
   type BaseFeatureLab,
   type InfoPainel,
   type RegraFeatureLab,
   type ResultadoAgregacao,
   type ResultadoFeatureLab,
+  type ResultadoRegressaoManual,
 } from "../lib/api";
 
 function Metrica({ rotulo, valor }: { rotulo: string; valor: string }) {
@@ -41,6 +44,7 @@ const CAMPOS_ORDENACAO: { campo: CampoOrdenacao; rotulo: string }[] = [
 const ABAS = [
   { id: "esfera1", rotulo: "Esfera 1" },
   { id: "esfera2", rotulo: "Esfera 2" },
+  { id: "esfera3", rotulo: "Esfera 3" },
 ] as const;
 
 type Aba = (typeof ABAS)[number]["id"];
@@ -82,12 +86,19 @@ export default function FeatureLabPagina() {
   const [maxRegras, setMaxRegras] = useState(20);
   const [permitirCruzamento, setPermitirCruzamento] = useState(true);
   const [proporcaoVariaveis, setProporcaoVariaveis] = useState<string>("");
-  const [metodoSplit, setMetodoSplit] = useState<"aleatorio" | "coluna">("aleatorio");
-  const [colunaSplit, setColunaSplit] = useState("");
-  const [valoresDevTexto, setValoresDevTexto] = useState("");
-  const [valoresTesteTexto, setValoresTesteTexto] = useState("");
   const [rodandoEsfera2, setRodandoEsfera2] = useState(false);
   const [resultado, setResultado] = useState<ResultadoFeatureLab | null>(null);
+
+  // --- split treino/teste (compartilhado entre esferas 2 e 3, mora na sidebar) ---
+  const [metodoSplit, setMetodoSplit] = useState<"aleatorio" | "coluna">("aleatorio");
+  const [colunaSplit, setColunaSplit] = useState("");
+  const [valoresDevSplit, setValoresDevSplit] = useState<Set<string>>(new Set());
+  const [valoresTesteSplit, setValoresTesteSplit] = useState<Set<string>>(new Set());
+
+  // --- esfera 3 ---
+  const [colunasX3, setColunasX3] = useState<Set<string>>(new Set());
+  const [rodandoEsfera3, setRodandoEsfera3] = useState(false);
+  const [resultadoEsfera3, setResultadoEsfera3] = useState<ResultadoRegressaoManual | null>(null);
 
   // --- resultado: ordenação/filtro ---
   const [ordenarPor, setOrdenarPor] = useState<CampoOrdenacao>("iv_teste");
@@ -115,7 +126,11 @@ export default function FeatureLabPagina() {
     setColunasNumericasBase([]);
     setResultadoEsfera1(null);
     setResultado(null);
+    setResultadoEsfera3(null);
     setFonteEsfera2("bruta");
+    setColunaSplit("");
+    setValoresDevSplit(new Set());
+    setValoresTesteSplit(new Set());
   }
 
   useEffect(() => {
@@ -163,6 +178,46 @@ export default function FeatureLabPagina() {
       setJanelas((atual) => new Set(atual).add(n));
       setJanelaCustom("");
     }
+  }
+
+  // Um valor só pode ser treino OU teste, nunca os dois -- marcar um lado
+  // desmarca o outro automaticamente.
+  function aoAlternarValorSplit(valor: string, destino: "dev" | "teste") {
+    if (destino === "dev") {
+      setValoresDevSplit((atual) => {
+        const novo = new Set(atual);
+        if (novo.has(valor)) novo.delete(valor);
+        else novo.add(valor);
+        return novo;
+      });
+      setValoresTesteSplit((atual) => {
+        const novo = new Set(atual);
+        novo.delete(valor);
+        return novo;
+      });
+    } else {
+      setValoresTesteSplit((atual) => {
+        const novo = new Set(atual);
+        if (novo.has(valor)) novo.delete(valor);
+        else novo.add(valor);
+        return novo;
+      });
+      setValoresDevSplit((atual) => {
+        const novo = new Set(atual);
+        novo.delete(valor);
+        return novo;
+      });
+    }
+  }
+
+  function construirParamsSplit(usaRodarDireto: boolean) {
+    if (usaRodarDireto || metodoSplit !== "coluna") return {};
+    return {
+      metodo_split: "coluna" as const,
+      coluna_split: colunaSplit,
+      valores_dev: [...valoresDevSplit],
+      valores_teste: [...valoresTesteSplit],
+    };
   }
 
   async function aoEnviarPainel(arquivo: File, nome: string) {
@@ -226,15 +281,7 @@ export default function FeatureLabPagina() {
       proporcao_variaveis_por_split: proporcao,
     };
     const usaRodarDireto = fonteEsfera2 === "bruta" && base.tipo === "flat";
-    const paramsSplit =
-      !usaRodarDireto && metodoSplit === "coluna"
-        ? {
-            metodo_split: "coluna" as const,
-            coluna_split: colunaSplit,
-            valores_dev: valoresDevTexto.split(",").map((s) => s.trim()).filter(Boolean),
-            valores_teste: valoresTesteTexto.split(",").map((s) => s.trim()).filter(Boolean),
-          }
-        : {};
+    const paramsSplit = construirParamsSplit(usaRodarDireto);
     try {
       let r: ResultadoFeatureLab;
       if (fonteEsfera2 === "esfera1") {
@@ -259,6 +306,38 @@ export default function FeatureLabPagina() {
     }
   }
 
+  async function aoRodarEsfera3() {
+    if (!base) return;
+    if (colunasX3.size === 0) {
+      setErro("Selecione ao menos uma coluna.");
+      return;
+    }
+    if (fonteEsfera2 === "esfera1" && !resultadoEsfera1) {
+      setErro("Rode a esfera 1 primeiro, ou troque a fonte pra 'colunas da base' na aba Esfera 2.");
+      return;
+    }
+
+    setRodandoEsfera3(true);
+    setErro(null);
+    try {
+      const tabela =
+        fonteEsfera2 === "esfera1" && resultadoEsfera1
+          ? resultadoEsfera1.tabela
+          : (await carregarBaseBruta(base.nome, base.tipo, colunaY)).tabela;
+      const r = await rodarRegressaoManual({
+        tabela,
+        colunas_x: [...colunasX3],
+        coluna_y: colunaY,
+        ...construirParamsSplit(false),
+      });
+      setResultadoEsfera3(r);
+    } catch (e) {
+      setErro(String(e));
+    } finally {
+      setRodandoEsfera3(false);
+    }
+  }
+
   function alternarOrdenacao(campo: CampoOrdenacao) {
     if (campo === ordenarPor) setOrdemAsc(!ordemAsc);
     else {
@@ -277,13 +356,15 @@ export default function FeatureLabPagina() {
     setColunaY("y");
     setResultadoEsfera1(null);
     setResultado(null);
+    setResultadoEsfera3(null);
     setFonteEsfera2("bruta");
     setColunasX(new Set());
+    setColunasX3(new Set());
     setProporcaoVariaveis("");
     setMetodoSplit("aleatorio");
     setColunaSplit("");
-    setValoresDevTexto("");
-    setValoresTesteTexto("");
+    setValoresDevSplit(new Set());
+    setValoresTesteSplit(new Set());
     setErro(null);
     setAba("esfera1");
   }
@@ -333,6 +414,13 @@ export default function FeatureLabPagina() {
         colunasBase={colunasBase}
         colunaY={colunaY}
         aoMudarColunaY={setColunaY}
+        metodoSplit={metodoSplit}
+        aoMudarMetodoSplit={setMetodoSplit}
+        colunaSplit={colunaSplit}
+        aoMudarColunaSplit={setColunaSplit}
+        valoresDev={valoresDevSplit}
+        valoresTeste={valoresTesteSplit}
+        aoAlternarValorSplit={aoAlternarValorSplit}
         aoLimparTudo={aoLimparTudo}
       />
 
@@ -744,75 +832,9 @@ export default function FeatureLabPagina() {
                 </p>
 
                 {!usaRodarDireto && (
-                  <div className="mt-4 border-t border-slate-800 pt-4">
-                    <p className="mb-1.5 text-[11px] text-slate-500">split treino/teste</p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setMetodoSplit("aleatorio")}
-                        className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-                          metodoSplit === "aleatorio"
-                            ? "border-emerald-600 bg-emerald-950/40 text-emerald-300"
-                            : "border-slate-700 bg-slate-800/60 text-slate-400 hover:text-slate-200"
-                        }`}
-                      >
-                        aleatório (50/50)
-                      </button>
-                      <button
-                        onClick={() => setMetodoSplit("coluna")}
-                        className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-                          metodoSplit === "coluna"
-                            ? "border-emerald-600 bg-emerald-950/40 text-emerald-300"
-                            : "border-slate-700 bg-slate-800/60 text-slate-400 hover:text-slate-200"
-                        }`}
-                      >
-                        coluna de amostra existente
-                      </button>
-                    </div>
-
-                    {metodoSplit === "coluna" && (
-                      <div className="mt-3 flex flex-wrap items-end gap-3">
-                        <div>
-                          <label className="mb-1 block text-[11px] text-slate-500">coluna</label>
-                          <select
-                            value={colunaSplit}
-                            onChange={(e) => setColunaSplit(e.target.value)}
-                            className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-                          >
-                            <option value="">selecione…</option>
-                            {colunasBase.map((c) => (
-                              <option key={c} value={c}>
-                                {c}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-[11px] text-slate-500">
-                            valores = treino (separados por vírgula)
-                          </label>
-                          <input
-                            type="text"
-                            value={valoresDevTexto}
-                            onChange={(e) => setValoresDevTexto(e.target.value)}
-                            placeholder="dev,treino"
-                            className="w-40 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-[11px] text-slate-500">
-                            valores = teste (separados por vírgula)
-                          </label>
-                          <input
-                            type="text"
-                            value={valoresTesteTexto}
-                            onChange={(e) => setValoresTesteTexto(e.target.value)}
-                            placeholder="teste,oot"
-                            className="w-40 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <p className="mt-3 text-xs text-slate-500">
+                    Split treino/teste configurado na barra lateral ({metodoSplit === "aleatorio" ? "aleatório" : `coluna "${colunaSplit || "?"}"`}).
+                  </p>
                 )}
 
                 <button
@@ -918,6 +940,115 @@ export default function FeatureLabPagina() {
                       </div>
                     </>
                   )}
+                </div>
+              )}
+            </div>
+
+            <div className={aba === "esfera3" ? "" : "hidden"}>
+              <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-5">
+                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Regressão logística manual
+                </h2>
+                <p className="mb-4 text-xs text-slate-500">
+                  Monta um modelo com as variáveis que você escolher (mesma fonte configurada na aba
+                  Esfera 2 — colunas da base ou saída da esfera 1) e mede KS/AUC de verdade, com o mesmo
+                  núcleo do Pedro_Wise.
+                </p>
+
+                <div className="mb-4">
+                  <p className="mb-1.5 text-[11px] text-slate-500">variáveis do modelo</p>
+                  <div className="flex max-h-48 flex-wrap gap-2 overflow-y-auto">
+                    {colunasParaEsfera2.map((c) => (
+                      <label
+                        key={c}
+                        className="flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={colunasX3.has(c)}
+                          onChange={() => alternar(colunasX3, c, setColunasX3)}
+                          className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"
+                        />
+                        {c}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  onClick={aoRodarEsfera3}
+                  disabled={rodandoEsfera3}
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {rodandoEsfera3 ? "Rodando…" : "Rodar esfera 3"}
+                </button>
+              </div>
+
+              {resultadoEsfera3 && (
+                <div className="mt-6 rounded-xl border border-slate-700 bg-slate-900/70 p-5">
+                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Resultado</h2>
+                  <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                    <Metrica rotulo="KS dev" valor={resultadoEsfera3.ks_dev.toFixed(3)} />
+                    <Metrica rotulo="KS teste" valor={resultadoEsfera3.ks_teste.toFixed(3)} />
+                    <Metrica rotulo="AUC teste" valor={resultadoEsfera3.auc_teste.toFixed(3)} />
+                    <Metrica rotulo="dev / teste" valor={`${resultadoEsfera3.n_dev} / ${resultadoEsfera3.n_teste}`} />
+                    <Metrica
+                      rotulo="taxa evento dev"
+                      valor={`${(resultadoEsfera3.taxa_evento_dev * 100).toFixed(1)}%`}
+                    />
+                    <Metrica
+                      rotulo="taxa evento teste"
+                      valor={`${(resultadoEsfera3.taxa_evento_teste * 100).toFixed(1)}%`}
+                    />
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <p className="mb-1.5 text-[11px] text-slate-500">coeficientes</p>
+                      <div className="max-h-72 overflow-y-auto rounded-lg border border-slate-700">
+                        <table className="w-full text-xs">
+                          <thead className="sticky top-0 bg-slate-800/90 text-slate-400">
+                            <tr>
+                              <th className="px-3 py-1.5 text-left font-medium">variável</th>
+                              <th className="px-3 py-1.5 text-right font-medium">coeficiente</th>
+                              <th className="px-3 py-1.5 text-right font-medium">erro padrão</th>
+                              <th className="px-3 py-1.5 text-right font-medium">p-valor</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(resultadoEsfera3.coeficientes).map(([nome, coef], i) => {
+                              const stats = resultadoEsfera3.estatisticas[nome];
+                              return (
+                                <tr key={nome} className={i % 2 === 0 ? "bg-slate-900/40" : "bg-slate-900/70"}>
+                                  <td className="px-3 py-1 font-mono text-slate-300">{nome}</td>
+                                  <td className="px-3 py-1 text-right tabular-nums text-slate-300">
+                                    {coef.toFixed(4)}
+                                  </td>
+                                  <td className="px-3 py-1 text-right tabular-nums text-slate-500">
+                                    {stats ? stats.erro_padrao.toFixed(4) : "—"}
+                                  </td>
+                                  <td
+                                    className={`px-3 py-1 text-right tabular-nums ${
+                                      stats && stats.p_valor < 0.05 ? "text-emerald-400" : "text-slate-500"
+                                    }`}
+                                  >
+                                    {stats ? stats.p_valor.toFixed(4) : "—"}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="mb-1.5 text-[11px] text-slate-500">curva KS (teste)</p>
+                      <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+                        <GraficoKS tabela={resultadoEsfera3.tabela_decis} />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

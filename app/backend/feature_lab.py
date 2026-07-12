@@ -38,6 +38,9 @@ from agregacao_temporal import (  # noqa: E402
 )
 from categorizacao import aplicar_bins, bins_frequencia_igual  # noqa: E402
 from interacao import avaliar_estabilidade, extrair_candidatas  # noqa: E402
+from pedro_wise.estimators import LogisticGLM  # noqa: E402
+from pedro_wise.metrics import KSGaussianMetric  # noqa: E402
+from sklearn.metrics import roc_auc_score  # noqa: E402
 from transformacao.woe import ajustar_woe  # noqa: E402
 
 DIR_PAINEIS = _RAIZ / "data"
@@ -134,6 +137,21 @@ def _carregar_tabela_base(base: str, tipo: Literal["painel", "flat"]) -> tuple[p
 
     df_dev, df_teste = carregar_dataset(base)
     return pd.concat([df_dev, df_teste], ignore_index=True), None
+
+
+def valores_distintos_base(
+    base: str, tipo: Literal["painel", "flat"], coluna: str, limite: int = 50
+) -> list[dict[str, Any]]:
+    """Valores distintos de uma coluna da base, com contagem -- pra
+    interface montar um seletor de "o que é treino/o que é teste" com
+    opções reais em vez de pedir pro usuário digitar às cegas (mesmo
+    padrão de `ingestao.valores_distintos`, mas em cima de uma base do
+    Feature-lab em vez de um upload em staging)."""
+    df, _ = _carregar_tabela_base(base, tipo)
+    if coluna not in df.columns:
+        raise ValueError(f"Coluna '{coluna}' não existe em '{base}'")
+    contagens = df[coluna].astype(str).value_counts().head(limite)
+    return [{"valor": v, "contagem": int(c)} for v, c in contagens.items()]
 
 
 def carregar_base_bruta(base: str, tipo: Literal["painel", "flat"], coluna_y: str = "y") -> dict[str, Any]:
@@ -462,3 +480,54 @@ def rodar_direto(
         permitir_cruzamento_entre_bases,
         proporcao_variaveis_por_split=proporcao_variaveis_por_split,
     )
+
+
+def rodar_regressao_manual(
+    registros: list[dict[str, Any]],
+    colunas_x: list[str],
+    coluna_y: str = "y",
+    metodo_split: Literal["aleatorio", "coluna"] = "aleatorio",
+    coluna_split: str | None = None,
+    valores_dev: list[str] | None = None,
+    valores_teste: list[str] | None = None,
+    semente: int = 0,
+) -> dict[str, Any]:
+    """Esfera 3: monta uma regressão logística com as variáveis que o
+    usuário escolher (agregadas, brutas, ou qualquer coluna disponível),
+    ajustada via o mesmo `LogisticGLM`/`KSGaussianMetric` que o Pedro_Wise
+    usa -- núcleo nunca reimplementado, só reaproveitado aqui pra um
+    ajuste manual em vez da busca automática."""
+    if not colunas_x:
+        raise ValueError("Selecione ao menos uma coluna")
+    if coluna_y not in (registros[0] if registros else {}):
+        raise ValueError(f"Tabela sem coluna '{coluna_y}'")
+
+    df = pd.DataFrame.from_records(registros)
+    if coluna_y != "y":
+        df = df.rename(columns={coluna_y: "y"})
+    dev, teste = _dividir_dev_teste(df, metodo_split, semente, coluna_split, valores_dev, valores_teste)
+
+    X_dev, y_dev = dev[colunas_x], dev["y"]
+    X_teste, y_teste = teste[colunas_x], teste["y"]
+
+    modelo = LogisticGLM().fit(X_dev, y_dev)
+    ks_dev = KSGaussianMetric(criterio="dev")(modelo, X_dev, y_dev, X_teste, y_teste)
+    ks_teste = KSGaussianMetric(criterio="teste")(modelo, X_dev, y_dev, X_teste, y_teste)
+
+    prob_teste = modelo.predict_proba(X_teste)
+    auc_teste = float(roc_auc_score(y_teste, prob_teste))
+
+    from logica import _tabela_decis  # import tardio evita ciclo com main.py
+
+    return {
+        "coeficientes": modelo.coeficientes(),
+        "estatisticas": modelo.estatisticas(),
+        "ks_dev": ks_dev,
+        "ks_teste": ks_teste,
+        "auc_teste": auc_teste,
+        "n_dev": len(dev),
+        "n_teste": len(teste),
+        "taxa_evento_dev": float(y_dev.mean()),
+        "taxa_evento_teste": float(y_teste.mean()),
+        "tabela_decis": _tabela_decis(y_teste, prob_teste),
+    }

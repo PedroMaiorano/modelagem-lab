@@ -27,7 +27,9 @@ from feature_lab import (
     listar_paineis,
     rodar_agregacao,
     rodar_direto,
+    rodar_regressao_manual,
     salvar_painel,
+    valores_distintos_base,
 )
 from ingestao import (
     calcular_corte_por_percentual,
@@ -531,6 +533,46 @@ def rota_rodar_direto(config: ConfigDireto) -> dict[str, Any]:
             permitir_cruzamento_entre_bases=config.permitir_cruzamento_entre_bases,
             coluna_y=config.coluna_y,
             proporcao_variaveis_por_split=config.proporcao_variaveis_por_split,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/api/feature-lab/valores-distintos")
+def rota_valores_distintos_base(
+    base: str, tipo: Literal["painel", "flat"], coluna: str, limite: int = 50
+) -> list[dict[str, Any]]:
+    """Valores distintos de uma coluna da base -- pro seletor de split por
+    amostra existente mostrar opções reais em vez de texto livre."""
+    try:
+        return valores_distintos_base(base, tipo, coluna, limite)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+class ConfigRegressaoManual(BaseModel):
+    tabela: list[dict[str, Any]]
+    colunas_x: list[str]
+    coluna_y: str = "y"
+    metodo_split: Literal["aleatorio", "coluna"] = "aleatorio"
+    coluna_split: str | None = None
+    valores_dev: list[str] | None = None
+    valores_teste: list[str] | None = None
+
+
+@app.post("/api/feature-lab/regressao-manual")
+def rota_rodar_regressao_manual(config: ConfigRegressaoManual) -> dict[str, Any]:
+    """Esfera 3: regressão logística manual com as variáveis escolhidas --
+    KS/AUC/coeficientes/curva de decis, mesmo núcleo do Pedro_Wise."""
+    try:
+        return rodar_regressao_manual(
+            registros=config.tabela,
+            colunas_x=config.colunas_x,
+            coluna_y=config.coluna_y,
+            metodo_split=config.metodo_split,
+            coluna_split=config.coluna_split,
+            valores_dev=config.valores_dev,
+            valores_teste=config.valores_teste,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
