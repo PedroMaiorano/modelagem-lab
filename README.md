@@ -4,17 +4,27 @@ Laboratório pessoal de ciência de dados: modelagem estatística e ML em **Pyth
 técnicas clássicas e SOTA. Agnóstico de domínio (risco de crédito é caso de uso, não
 único foco).
 
-## 4 módulos de modelagem (compostos num pipeline)
+## 8 módulos de modelagem (costurados num funil por `pipeline_lab`)
 
 ```
-construcao/  ──►  categorizacao/  ──►  transformacao/  ──►  pedro_wise/
-(features novas)   (bins por var.)     (WOE por bin)        (seleção final)
+divisao → construcao (opc.) → agregacao_temporal/esfera1 (opc.) → interacao/esfera2 (opc.)
+   → categorizacao+transformacao → preselecao (opc.) → pedro_wise
 ```
 
-1. **Categorização** (`python/categorizacao/`) — binning: largura/frequência igual, árvore, monotônico (aproximação do OptBinning). ✅ 7 testes.
-2. **Transformação** (`python/transformacao/`) — WOE + Information Value + Box-Cox/Yeo-Johnson, fit/transform anti-leakage. ✅ 16 testes. Fecha a lacuna histórica: `_woe` era só nome, agora é implementação.
-3. **Construção** (`python/construcao/`) — razões/diferenças entre variáveis (escopo v1 deliberadamente mínimo). ✅ 5 testes.
-4. **Treinamento** (`python/pedro_wise/`) — port completo (níveis 1-3) do algoritmo Pedro_Wise (R→Python), validado contra o R original, com 3 experimentos comparativos.
+`python/pipeline_lab/` é a orquestração: coleção de funções soltas (não uma
+API orientada a objeto) que compõem os módulos-núcleo na ordem certa, sempre
+sobre um `pandas.DataFrame` — ver [`python/pipeline_lab/REFERENCIA.md`](python/pipeline_lab/REFERENCIA.md)
+para toda função pública, parâmetro e a literatura que justifica cada decisão.
+
+1. **Construção** (`python/construcao/`) — razões/diferenças entre variáveis (escopo v1 deliberadamente mínimo).
+2. **Agregação temporal** (`python/agregacao_temporal/`, "esfera 1") — primitivas de janela móvel sobre painel (máximo/média/mínimo/desvio-padrão/tendência), sem look-ahead, preservando o split dev/teste — behavioral scoring.
+3. **Interação** (`python/interacao/`, "esfera 2") — descoberta de regras estilo RuleFit (ensemble de árvores rasas → caminhos raiz-folha viram candidatas 0/1), com validação de estabilidade out-of-time.
+4. **Categorização** (`python/categorizacao/`) — binning: largura/frequência igual, árvore, monotônico (aproximação do OptBinning).
+5. **Transformação** (`python/transformacao/`) — WOE + Information Value + Box-Cox/Yeo-Johnson, fit/transform anti-leakage. Fecha a lacuna histórica: `_woe` era só nome, agora é implementação.
+6. **Pré-seleção** (`python/preselecao/`) — filtros de variância/IV/correlação antes do Pedro_Wise, para conter a explosão combinatória de candidatas (construção + transformações de potência).
+7. **Treinamento** (`python/pedro_wise/`) — port completo (níveis 1-3) do algoritmo Pedro_Wise (R→Python), validado contra o R original, com 3 experimentos comparativos.
+
+✅ 135 testes cobrindo os 8 módulos + scraping.
 
 **Pipeline completo testado no dataset real**: bate o baseline cru (KS 0.42 vs. 0.40, AUC 0.76 vs. 0.73) — ver [`docs/experimentos/pipeline-completo-credito-real.md`](docs/experimentos/pipeline-completo-credito-real.md).
 
@@ -27,7 +37,8 @@ construcao/  ──►  categorizacao/  ──►  transformacao/  ──►  pe
 ## Estrutura
 ```
 docs/          base de conhecimento (SOTA tracker, APIs, literatura por módulo, experimentos, livros)
-python/        categorizacao/ transformacao/ construcao/ pedro_wise/ — os 4 módulos
+python/        pipeline_lab/ (orquestração) + construcao/ agregacao_temporal/ interacao/
+               categorizacao/ transformacao/ preselecao/ pedro_wise/ — os 8 módulos
 app/           streamlit_app.py (v1) + backend/ e frontend/ (v2) — consomem python/*, não reimplementam
 r/             protótipos/originais em R
 scraping/      clients de APIs abertas (arXiv, Semantic Scholar, OpenAlex, CrossRef, Europe PMC)
@@ -51,11 +62,11 @@ notebooks/     exploração ad-hoc
 
 ## Comandos
 ```bash
-pytest tests -x -v                                                      # testes (68)
+pytest tests -x -v                                                      # testes (135)
 ruff check python/ scraping/ scripts/ app/backend/                      # lint
 mypy python/pedro_wise python/categorizacao python/transformacao python/construcao scraping/  # type check (strict)
 
-python scripts/pipeline_completo_credito_real.py                        # construção->categorização->WOE->treinamento
+python scripts/pipeline_completo_credito_real.py                        # funil completo via pipeline_lab
 python scraping/arxiv_client.py --query 'cat:stat.ML AND all:"variable selection"' --max 10
 python scripts/benchmark_paralelizacao.py                               # mede backend/n_jobs
 Rscript scripts/validar_port_r.R && python scripts/validar_port_python.py  # revalida port vs. R
