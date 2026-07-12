@@ -5,9 +5,12 @@
 > suportado, não o único. **8 módulos de modelagem** (cada um um pacote Python
 > separado top-level, costurados num funil por `pipeline_lab` — ver §7):
 > `divisao` (split dev/teste) → `construcao` (razões/diferenças) → `agregacao_temporal`
-> ("esfera 1", behavioral scoring) → `interacao` ("esfera 2", RuleFit-style) →
+> (behavioral scoring) → `interacao` (RuleFit-style) →
 > `categorizacao` (binning) → `transformacao` (WOE/IV) → `preselecao` (filtros
-> pré-Pedro_Wise) → `pedro_wise` (seleção final — treinamento). Mais 2 pilares de
+> pré-Pedro_Wise) → `pedro_wise` (seleção final — treinamento). `modelagem_lab` é o
+> pacote raiz que reexporta os 8 num namespace só, pra consumo externo (notebook);
+> `pipeline_lab.Esteira` é o builder encadeável que compõe o funil sem desempacotar
+> retorno na mão (ver `python/pipeline_lab/REFERENCIA.md`). Mais 2 pilares de
 > suporte: scraping de literatura acadêmica aberta, e interface (2 versões: Streamlit
 > v1 e FastAPI+Next.js v2, ambas em `app/`, ver §6-7).
 
@@ -18,7 +21,9 @@
 ```bash
 test:      pytest tests -x -v
 lint:      ruff check python/ scraping/ scripts/ app/backend/
-typecheck: mypy python/pedro_wise python/categorizacao python/transformacao python/construcao scraping/
+typecheck: mypy python/pedro_wise python/categorizacao python/transformacao python/construcao \
+           python/agregacao_temporal python/interacao python/preselecao python/pipeline_lab \
+           python/modelagem_lab scraping/
 r-script:  Rscript r/<arquivo>.R
 scraper:   python scraping/arxiv_client.py --query 'cat:stat.ML AND all:"variable selection"' --max 10
 benchmark: python scripts/benchmark_paralelizacao.py
@@ -26,10 +31,18 @@ validar:   Rscript scripts/validar_port_r.R && python scripts/validar_port_pytho
 pipeline:  python scripts/pipeline_completo_credito_real.py   # funil completo via pipeline_lab (ver REFERENCIA.md do módulo)
 app-v1:    python -m streamlit run app/streamlit_app.py   # ver nota Windows em docs/planos/interface-streamlit.md
 app-v2:    python -m uvicorn main:app --reload --port 8001 --app-dir app/backend  # + `cd app/frontend && npm run dev`
+release:   git tag vX.Y.Z && git push --tags   # bump version em pyproject.toml antes -- Actions builda e anexa o wheel na Release
 ```
 > Os 8 módulos de modelagem, scraping de literatura e as 2 versões de interface
-> estão implementados e testados (135 testes Python + build/lint do frontend limpos).
+> estão implementados e testados (143 testes Python + build/lint do frontend limpos).
 > Todo código Python novo é type-hinted, testado e lintado.
+>
+> **Instalação como biblioteca** (fora do repo, ex.: notebook): não usar
+> `git+https://...` com `--force-reinstall` (sintoma de falta de versão) —
+> tagueie uma release (`git tag vX.Y.Z && git push --tags`, ver `.github/workflows/release.yml`)
+> e instale o wheel publicado:
+> `pip install https://github.com/PedroMaiorano/modelagem-lab/releases/download/vX.Y.Z/modelagem_lab-X.Y.Z-py3-none-any.whl`.
+> Localmente, `pip install -e .` a partir da raiz do repo.
 
 ---
 
@@ -100,10 +113,11 @@ modelagem-lab/
 │   ├── planos/                         # decisões de arquitetura/config
 │   └── INDEX.md                        # mapa da wiki
 ├── python/                             # cada pasta é um pacote top-level (ver pyproject.toml)
-│   ├── pipeline_lab/                   # ORQUESTRAÇÃO do funil completo (divisao→...→treinamento) + REFERENCIA.md
+│   ├── modelagem_lab/                  # PACOTE RAIZ — reexporta os 8 módulos + Esteira num namespace só (consumo externo)
+│   ├── pipeline_lab/                   # ORQUESTRAÇÃO do funil completo (divisao→...→treinamento) + esteira.py + REFERENCIA.md
 │   ├── construcao/                     # razões/diferenças (escopo v1 mínimo, deliberado)
-│   ├── agregacao_temporal/             # "esfera 1" — primitivas de janela móvel sobre painel (behavioral scoring)
-│   ├── interacao/                      # "esfera 2" — descoberta de regras via RuleFit-style (GBM raso)
+│   ├── agregacao_temporal/             # primitivas de janela móvel sobre painel (behavioral scoring)
+│   ├── interacao/                      # descoberta de regras via RuleFit-style (GBM raso)
 │   ├── categorizacao/                  # binning (largura/frequência/árvore/monotônico)
 │   ├── transformacao/                  # WOE/IV (fit/transform anti-leakage)
 │   ├── preselecao/                     # filtros (variância/IV/correlação) antes do Pedro_Wise
@@ -131,7 +145,7 @@ nunca toca disco/rede) costura os módulos-núcleo nesta ordem — cada etapa
 opcional exceto `divisao`/`categorizacao`/`treinamento`:
 
 ```
-divisao → construcao (opc.) → agregacao_temporal/esfera1 (opc.) → interacao/esfera2 (opc.)
+divisao → construcao (opc.) → agregacao_temporal (opc.) → interacao (opc.)
    → categorizacao+transformacao → preselecao (opc.) → pedro_wise
 ```
 
@@ -143,11 +157,21 @@ tem o resultado (pipeline completo bate o baseline cru: KS 0.42 vs. 0.40).
 Cada módulo é standalone (testável isolado) mas desenhado para essa costura.
 Convenção de coluna-alvo a partir de `divisao`: a resposta sempre se chama `"y"`.
 
+- **`modelagem_lab/`** (pacote raiz): reexporta os 8 pacotes-núcleo +
+  `Esteira` num namespace só (`import modelagem_lab as ml`) — pensado pra
+  consumo de fora do repo (notebook, outro projeto), evitando colisão de
+  nome com pacotes genéricos de outros labs (`construcao`, `interacao`...)
+  no mesmo ambiente Python. Nenhum código interno do repo precisa importar
+  daqui — é só a porta de entrada externa.
 - **`pipeline_lab/`** (orquestração): `divisao` (split dev/teste por amostra
-  existente ou aleatório), `construcao`/`esfera1`/`esfera2` (wrappers dos
-  módulos-núcleo abaixo), `categorizar` (categorização+WOE juntos, última
-  etapa antes de gerar as versões `_woe`/`_log`/`_bin` de cada base),
-  `preselecao`, `treinamento`. Único lugar que sabe a ORDEM certa do funil.
+  existente ou aleatório), `construcao`/`agregacao_temporal`/`interacao`
+  (wrappers dos módulos-núcleo abaixo), `categorizar` (categorização+WOE
+  juntos, última etapa antes de gerar as versões `_woe`/`_log`/`_bin` de
+  cada base), `preselecao`, `treinamento`. Único lugar que sabe a ORDEM
+  certa do funil. `esteira.py` (`Esteira`) é um builder mutável encadeável
+  por cima dessas mesmas funções — resolve a inconsistência de retorno
+  entre etapas (tuple/dict/dataclass) e impõe a ordem em runtime
+  (`EtapaForaDeOrdemError`) em vez de só documentada.
 - **`categorizacao/`** (binning): `bins_largura_igual`/`bins_frequencia_igual`
   (baseline não-supervisionado), `bins_arvore` (supervisionado via árvore
   rasa), `bins_monotonicos` (merge guloso até taxa de evento monotônica —
@@ -164,14 +188,14 @@ Convenção de coluna-alvo a partir de `divisao`: a resposta sempre se chama `"y
   (GP/RL/Deep Feature Synthesis). Motivo documentado em
   `docs/literatura/construcao-variaveis.md` — é o módulo menos maduro na
   literatura (duas escolas divergentes), maior risco de over-engineering.
-- **`agregacao_temporal/`** ("esfera 1", behavioral scoring): a partir de um
+- **`agregacao_temporal/`** (behavioral scoring): a partir de um
   painel (chave + tempo + variável mês a mês), gera primitivas de janela
   móvel (máximo/média/mínimo/desvio-padrão/tendência) — catálogo inspirado no
   vocabulário do Deep Feature Synthesis. Garante ausência de look-ahead (só
   usa histórico até o próprio período) e preserva o split dev/teste (agrega
   cada base separadamente). `safra.py` normaliza formatos inconsistentes de
   período (`anomes` int, string, `datetime`) antes de agregar.
-- **`interacao/`** ("esfera 2", descoberta de regras): RuleFit-style
+- **`interacao/`** (descoberta de regras): RuleFit-style
   (Friedman & Popescu, 2008) — treina um ensemble de árvores rasas sobre as
   candidatas já construídas e extrai caminhos raiz-folha como regras de
   interação (≥2 condições), viram colunas 0/1 avaliadas por IV. Diferença

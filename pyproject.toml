@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "modelagem-lab"
-version = "0.1.0"
-description = "Núcleo de modelagem de risco de crédito -- agregação temporal, descoberta de interação (RuleFit-style), categorização/WOE, pré-seleção e Pedro_Wise (seleção stepwise). Ver pipeline_lab pra montar o funil completo em cima de um DataFrame."
+version = "0.2.0"
+description = "Núcleo de modelagem de risco de crédito -- agregação temporal, descoberta de interação (RuleFit-style), categorização/WOE, pré-seleção e Pedro_Wise (seleção stepwise). Ver modelagem_lab/pipeline_lab pra montar o funil completo em cima de um DataFrame (Esteira encadeável ou funções soltas)."
 requires-python = ">=3.11"
 dependencies = [
     "pandas>=2.0",
@@ -20,6 +20,9 @@ dependencies = [
 # em todo o repo, não "from python.pedro_wise"). package-dir mapeia "" (raiz
 # do pacote) pra python/, então o pip instala cada uma dessas pastas como
 # pacote top-level de verdade, sem precisar renomear nenhum import existente.
+# "modelagem_lab" é a porta de entrada única pra consumo externo (notebook,
+# outro projeto) -- reexporta os 8 pacotes abaixo num namespace só, sem
+# exigir mudança de import em nada que já roda dentro do repo.
 [tool.setuptools]
 package-dir = { "" = "python" }
 packages = [
@@ -27,6 +30,7 @@ packages = [
     "categorizacao",
     "construcao",
     "interacao",
+    "modelagem_lab",
     "pedro_wise",
     "pipeline_lab",
     "preselecao",

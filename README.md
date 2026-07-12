@@ -7,24 +7,40 @@ técnicas clássicas e SOTA. Agnóstico de domínio (risco de crédito é caso d
 ## 8 módulos de modelagem (costurados num funil por `pipeline_lab`)
 
 ```
-divisao → construcao (opc.) → agregacao_temporal/esfera1 (opc.) → interacao/esfera2 (opc.)
+divisao → construcao (opc.) → agregacao_temporal (opc.) → interacao (opc.)
    → categorizacao+transformacao → preselecao (opc.) → pedro_wise
 ```
 
-`python/pipeline_lab/` é a orquestração: coleção de funções soltas (não uma
-API orientada a objeto) que compõem os módulos-núcleo na ordem certa, sempre
-sobre um `pandas.DataFrame` — ver [`python/pipeline_lab/REFERENCIA.md`](python/pipeline_lab/REFERENCIA.md)
-para toda função pública, parâmetro e a literatura que justifica cada decisão.
+`python/pipeline_lab/` é a orquestração: coleção de funções soltas que
+compõem os módulos-núcleo na ordem certa, sempre sobre um
+`pandas.DataFrame` — ver [`python/pipeline_lab/REFERENCIA.md`](python/pipeline_lab/REFERENCIA.md)
+para toda função pública, parâmetro e a literatura que justifica cada
+decisão. Pra consumir o funil sem desempacotar o retorno de cada etapa na
+mão, use `Esteira` (builder encadeável):
+
+```python
+from modelagem_lab import Esteira
+
+resultado = (
+    Esteira.dividir_por_amostra(df, coluna_amostra="split", valores_dev=["train"],
+                                 valores_teste=["test"], coluna_y="target")
+    .construir_razoes(pares=[("pago", "fatura", "pct_pago")])
+    .categorizar_e_transformar()
+    .pre_selecionar(limiar_iv=0.02)
+    .treinar(criterio="teste")
+)
+print(resultado.variaveis, resultado.ks_teste)
+```
 
 1. **Construção** (`python/construcao/`) — razões/diferenças entre variáveis (escopo v1 deliberadamente mínimo).
-2. **Agregação temporal** (`python/agregacao_temporal/`, "esfera 1") — primitivas de janela móvel sobre painel (máximo/média/mínimo/desvio-padrão/tendência), sem look-ahead, preservando o split dev/teste — behavioral scoring.
-3. **Interação** (`python/interacao/`, "esfera 2") — descoberta de regras estilo RuleFit (ensemble de árvores rasas → caminhos raiz-folha viram candidatas 0/1), com validação de estabilidade out-of-time.
+2. **Agregação temporal** (`python/agregacao_temporal/`) — primitivas de janela móvel sobre painel (máximo/média/mínimo/desvio-padrão/tendência), sem look-ahead, preservando o split dev/teste — behavioral scoring.
+3. **Interação** (`python/interacao/`) — descoberta de regras estilo RuleFit (ensemble de árvores rasas → caminhos raiz-folha viram candidatas 0/1), com validação de estabilidade out-of-time.
 4. **Categorização** (`python/categorizacao/`) — binning: largura/frequência igual, árvore, monotônico (aproximação do OptBinning).
 5. **Transformação** (`python/transformacao/`) — WOE + Information Value + Box-Cox/Yeo-Johnson, fit/transform anti-leakage. Fecha a lacuna histórica: `_woe` era só nome, agora é implementação.
 6. **Pré-seleção** (`python/preselecao/`) — filtros de variância/IV/correlação antes do Pedro_Wise, para conter a explosão combinatória de candidatas (construção + transformações de potência).
 7. **Treinamento** (`python/pedro_wise/`) — port completo (níveis 1-3) do algoritmo Pedro_Wise (R→Python), validado contra o R original, com 3 experimentos comparativos.
 
-✅ 135 testes cobrindo os 8 módulos + scraping.
+✅ 143 testes cobrindo os 8 módulos + scraping.
 
 **Pipeline completo testado no dataset real**: bate o baseline cru (KS 0.42 vs. 0.40, AUC 0.76 vs. 0.73) — ver [`docs/experimentos/pipeline-completo-credito-real.md`](docs/experimentos/pipeline-completo-credito-real.md).
 
@@ -37,16 +53,35 @@ para toda função pública, parâmetro e a literatura que justifica cada decis�
 ## Estrutura
 ```
 docs/          base de conhecimento (SOTA tracker, APIs, literatura por módulo, experimentos, livros)
-python/        pipeline_lab/ (orquestração) + construcao/ agregacao_temporal/ interacao/
+python/        modelagem_lab/ (pacote raiz) + pipeline_lab/ (orquestração + Esteira) +
+               construcao/ agregacao_temporal/ interacao/
                categorizacao/ transformacao/ preselecao/ pedro_wise/ — os 8 módulos
 app/           streamlit_app.py (v1) + backend/ e frontend/ (v2) — consomem python/*, não reimplementam
 r/             protótipos/originais em R
 scraping/      clients de APIs abertas (arXiv, Semantic Scholar, OpenAlex, CrossRef, Europe PMC)
 scripts/       benchmark, validação R↔Python, experimentos comparativos, geração de datasets, pipeline completo
-tests/         pytest (68 testes)
+tests/         pytest (143 testes)
 notebooks/     exploração ad-hoc
 .claude/       configuração Claude Code (agents, skills, hooks)
+.github/       workflow de release (build + publica wheel/sdist na tag)
 ```
+
+## Instalação (como biblioteca, fora do repo)
+
+```bash
+# por release (recomendado -- sem clonar/buildar o repo a cada instalação)
+pip install https://github.com/PedroMaiorano/modelagem-lab/releases/download/vX.Y.Z/modelagem_lab-X.Y.Z-py3-none-any.whl
+
+# local, editável (clone do repo)
+pip install -e .
+```
+
+```python
+import modelagem_lab as ml   # namespace único -- ml.pedro_wise, ml.categorizacao, ml.Esteira, ...
+```
+
+Ver `.github/workflows/release.yml`: cada tag `vX.Y.Z` builda e publica o
+wheel automaticamente na Release correspondente.
 
 ## Começando
 - Config e comportamento: ver [`CLAUDE.md`](CLAUDE.md).
@@ -62,9 +97,11 @@ notebooks/     exploração ad-hoc
 
 ## Comandos
 ```bash
-pytest tests -x -v                                                      # testes (135)
+pytest tests -x -v                                                      # testes (143)
 ruff check python/ scraping/ scripts/ app/backend/                      # lint
-mypy python/pedro_wise python/categorizacao python/transformacao python/construcao scraping/  # type check (strict)
+mypy python/pedro_wise python/categorizacao python/transformacao python/construcao \
+     python/agregacao_temporal python/interacao python/preselecao python/pipeline_lab \
+     python/modelagem_lab scraping/                                     # type check (strict)
 
 python scripts/pipeline_completo_credito_real.py                        # funil completo via pipeline_lab
 python scraping/arxiv_client.py --query 'cat:stat.ML AND all:"variable selection"' --max 10

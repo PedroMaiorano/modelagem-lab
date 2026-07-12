@@ -1,7 +1,7 @@
-"""Esfera 1 — agregação temporal. Reduz um dataset com várias linhas por
-chave (painel: uma linha por chave-período) a uma linha por chave, com
+"""Agregação temporal (ex-"esfera 1"). Reduz um dataset com várias linhas
+por chave (painel: uma linha por chave-período) a uma linha por chave, com
 máximo/média/mínimo/desvio-padrão/tendência sobre janelas móveis. Roda
-ANTES de tudo o resto (Construção, Esfera 2, Categorização) -- ver
+ANTES de tudo o resto (Construção, Interação, Categorização) -- ver
 `docs/planos/` pra motivação completa.
 """
 

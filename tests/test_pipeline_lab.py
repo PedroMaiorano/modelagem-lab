@@ -1,6 +1,6 @@
 """Testes de python/pipeline_lab -- funções soltas que montam o funil
-completo (divisão → esfera 1 → esfera 2 → categorização → treinamento) em
-cima de um DataFrame qualquer, sem disco/FastAPI.
+completo (divisão → agregação temporal → interação → categorização →
+treinamento) em cima de um DataFrame qualquer, sem disco/FastAPI.
 """
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-from pipeline_lab import categorizar, divisao, esfera1, esfera2, treinamento
+from pipeline_lab import agregacao_temporal, categorizar, divisao, interacao, treinamento
 
 
 def test_dividir_por_amostra_aceita_rotulos_arbitrarios() -> None:
@@ -70,14 +70,14 @@ def test_fluxo_completo_ate_pedro_wise() -> None:
     n_chaves_dev_esperado = df_dev["id_cliente"].nunique()
     n_chaves_teste_esperado = df_teste["id_cliente"].nunique()
 
-    df_dev, df_teste, colunas_geradas = esfera1.aplicar(
+    df_dev, df_teste, colunas_geradas = agregacao_temporal.aplicar(
         df_dev, df_teste, chave="id_cliente", coluna_tempo="safra", colunas_valor=["valor"], janelas=[3]
     )
     assert len(df_dev) == n_chaves_dev_esperado  # uma linha por chave agora
     assert len(df_teste) == n_chaves_teste_esperado
     assert "valor_media_3m" in colunas_geradas
 
-    df_dev, df_teste, colunas_regra = esfera2.aplicar(df_dev, df_teste, n_arvores=20, max_regras=5)
+    df_dev, df_teste, colunas_regra = interacao.aplicar(df_dev, df_teste, n_arvores=20, max_regras=5)
     assert isinstance(colunas_regra, list)  # pode ou não achar regra, não é o ponto do teste
 
     woe_dev, woe_teste, iv_por_variavel = categorizar.categorizar_e_transformar(df_dev, df_teste)

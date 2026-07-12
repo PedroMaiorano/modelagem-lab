@@ -25,9 +25,9 @@ sys.path.insert(0, str(_RAIZ / "python"))
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
+import pipeline_lab.agregacao_temporal as pipeline_lab_agregacao_temporal  # noqa: E402
 import pipeline_lab.categorizar as pipeline_lab_categorizar  # noqa: E402
-import pipeline_lab.esfera1 as pipeline_lab_esfera1  # noqa: E402
-import pipeline_lab.esfera2 as pipeline_lab_esfera2  # noqa: E402
+import pipeline_lab.interacao as pipeline_lab_interacao  # noqa: E402
 from categorizacao import aplicar_bins, bins_monotonicos  # noqa: E402
 from construcao import construir_diferenca, construir_razao  # noqa: E402
 from pedro_wise.estimators import LogisticGLM  # noqa: E402
@@ -233,7 +233,7 @@ def _aplicar_esfera1(
     if not config.chave or not config.coluna_tempo or not config.colunas_valor or not config.janelas:
         raise ValueError("Esfera 1: informe chave, coluna tempo, colunas de valor e ao menos uma janela")
 
-    dev_agregado, teste_agregado, colunas_geradas = pipeline_lab_esfera1.aplicar(
+    dev_agregado, teste_agregado, colunas_geradas = pipeline_lab_agregacao_temporal.aplicar(
         df_dev, df_teste, config.chave, config.coluna_tempo, config.colunas_valor, config.janelas
     )
     fila.put(
@@ -317,7 +317,7 @@ def _rodar_esfera2(
     >= `config.iv_minimo` -- nunca o IV de dev, que já foi usado pra
     escolher a regra e está inflado por construção) viram coluna 0/1 nova.
     """
-    df_dev_novo, df_teste_novo, colunas_regra = pipeline_lab_esfera2.aplicar(
+    df_dev_novo, df_teste_novo, colunas_regra = pipeline_lab_interacao.aplicar(
         df_dev,
         df_teste,
         colunas_categoricas=config.colunas_categoricas,

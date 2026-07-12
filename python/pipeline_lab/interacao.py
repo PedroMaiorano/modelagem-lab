@@ -1,10 +1,10 @@
-"""Esfera 2 — descoberta de interação (RuleFit-style, ver
-`python/interacao`). Roda DEPOIS da esfera 1/Construção e ANTES de
-Categorização de propósito: as transformações de potência (log/raiz/quad/
-cubo/inversa) só existem a partir da Categorização, então nesse ponto do
-pipeline elas ainda não existem -- o GBM nunca vê `idade` e `idade_log` ao
-mesmo tempo, não precisa de filtro extra pra evitar regra redundante entre
-escalas da mesma variável.
+"""Descoberta de interação (ex-"esfera 2", RuleFit-style, ver
+`python/interacao`). Roda DEPOIS da agregação temporal/Construção e ANTES
+de Categorização de propósito: as transformações de potência (log/raiz/
+quad/cubo/inversa) só existem a partir da Categorização, então nesse ponto
+do pipeline elas ainda não existem -- o GBM nunca vê `idade` e `idade_log`
+ao mesmo tempo, não precisa de filtro extra pra evitar regra redundante
+entre escalas da mesma variável.
 """
 
 from __future__ import annotations

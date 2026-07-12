@@ -31,8 +31,8 @@ _RAIZ = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_RAIZ / "python"))
 
 import pandas as pd  # noqa: E402
-import pipeline_lab.esfera1 as pipeline_lab_esfera1  # noqa: E402
-import pipeline_lab.esfera2 as pipeline_lab_esfera2  # noqa: E402
+import pipeline_lab.agregacao_temporal as pipeline_lab_agregacao_temporal  # noqa: E402
+import pipeline_lab.interacao as pipeline_lab_interacao  # noqa: E402
 from agregacao_temporal import extrair_base_agregado  # noqa: E402
 from categorizacao import aplicar_bins, bins_frequencia_igual  # noqa: E402
 from interacao import (  # noqa: E402
@@ -184,10 +184,10 @@ def carregar_base_bruta(base: str, tipo: Literal["painel", "flat"], coluna_y: st
     return {"tabela": df.to_dict(orient="records"), "colunas": list(df.columns), "n_linhas": len(df)}
 
 
-#: Núcleo da esfera 1 mora em `pipeline_lab.esfera1` (biblioteca standalone,
+#: Núcleo da agregação temporal mora em `pipeline_lab.agregacao_temporal` (biblioteca standalone,
 #: sem disco/FastAPI) -- alias aqui só pra não quebrar quem já importa
 #: `_agregar_df` deste módulo (ex.: `logica.py`).
-_agregar_df = pipeline_lab_esfera1.agregar
+_agregar_df = pipeline_lab_agregacao_temporal.agregar
 
 
 def agregar_base(
@@ -409,10 +409,10 @@ def _dividir_dev_teste(
     return dividir_aleatorio(df, proporcao_teste=0.5, semente=semente)
 
 
-#: Núcleo mora em `pipeline_lab.esfera2` -- alias aqui só pra não quebrar
+#: Núcleo mora em `pipeline_lab.interacao` -- alias aqui só pra não quebrar
 #: quem já importa `_transformar_categoricas_woe` deste módulo (`logica.py`,
 #: `test_feature_lab.py`).
-_transformar_categoricas_woe = pipeline_lab_esfera2.transformar_categoricas_woe
+_transformar_categoricas_woe = pipeline_lab_interacao.transformar_categoricas_woe
 
 
 def descobrir_em_tabela(

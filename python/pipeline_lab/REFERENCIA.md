@@ -13,8 +13,8 @@
 1. [Filosofia e convenções](#1-filosofia-e-convenções)
 2. [`divisao`](#2-divisao)
 3. [`construcao`](#3-construcao)
-4. [`esfera1`](#4-esfera1)
-5. [`esfera2`](#5-esfera2)
+4. [`agregacao_temporal`](#4-agregacao_temporal)
+5. [`interacao`](#5-interacao)
 6. [`categorizar`](#6-categorizar)
 7. [`preselecao`](#7-preselecao)
 8. [`treinamento`](#8-treinamento)
@@ -30,9 +30,20 @@ FastAPI. Isso permite plugar um `pandas.DataFrame` qualquer e escolher só
 os módulos que fazem sentido para o seu caso, na ordem:
 
 ```
-divisao → construcao (opcional) → esfera1 (opcional) → esfera2 (opcional)
+divisao → construcao (opcional) → agregacao_temporal (opcional) → interacao (opcional)
 → categorizar → preselecao (opcional) → treinamento
 ```
+
+Cada etapa acima devolve um formato diferente (tuple de 2, tuple de 3,
+dict, dataclass) — de propósito, pra manter cada função solta e simples de
+testar isoladamente. Para consumir o funil inteiro sem desempacotar cada
+retorno na mão, use `pipeline_lab.esteira.Esteira`: um builder que guarda
+`df_dev`/`df_teste` e os artefatos intermediários (IV, colunas geradas,
+resultado da pré-seleção) como estado, encadeando `.metodo()` por etapa e
+impedindo em runtime (`EtapaForaDeOrdemError`) que `construcao`/
+`agregacao_temporal`/`interacao` rodem depois de `categorizar_e_transformar`.
+As funções soltas continuam existindo sem mudança — `Esteira` é só uma
+camada de conveniência por cima delas, útil sobretudo pra uso em notebook.
 
 **Convenção de coluna-alvo**: a partir de `divisao`, a variável resposta
 deve se chamar `"y"` em `df_dev`/`df_teste` — todas as etapas seguintes
@@ -111,7 +122,7 @@ Um paralelo direto em crédito: **Dumitrescu et al., 2021** (*Machine
 learning for credit scoring: Improving logistic regression with
 non-linear decision-tree effects*) usa efeitos extraídos de árvores como
 features construídas de volta para uma regressão logística — o mesmo
-espírito de "construção assistida" que `esfera2` (RuleFit-style) aplica
+espírito de "construção assistida" que `interacao` (RuleFit-style) aplica
 depois de `construcao` no funil.
 
 ### `construir_razao(numerador, denominador, nome, epsilon=1e-6)`
@@ -139,7 +150,7 @@ configuração além dos nomes das colunas.
 
 ---
 
-## 4. `esfera1`
+## 4. `agregacao_temporal`
 
 Agregação temporal (agregação "comportamental"/behavioral scoring) — a
 partir de um painel (chave + tempo + variável observada mês a mês),
@@ -184,7 +195,7 @@ bases. Retorna `(df_dev_agregado, df_teste_agregado, colunas_geradas)`.
 
 ---
 
-## 5. `esfera2`
+## 5. `interacao`
 
 Descoberta de interação — **RuleFit-style** (**Friedman & Popescu, 2008**,
 *Predictive learning via rule ensembles*, Annals of Applied Statistics):
@@ -198,7 +209,7 @@ extraídas das árvores viram termos de uma regressão com penalização L1
 (Lasso) que decide os pesos finais. Aqui as regras viram colunas 0/1 que
 entram no funil normal (categorização → pré-seleção → Pedro_Wise) — quem
 decide o que fica no modelo final continua sendo a busca stepwise do
-Pedro_Wise, não uma regressão L1 própria. Mantém a esfera 2 desacoplada da
+Pedro_Wise, não uma regressão L1 própria. Mantém a interação desacoplada da
 seleção final.
 
 ### `transformar_categoricas_woe(dev, teste, colunas_x, colunas_categoricas=None)`
@@ -252,8 +263,8 @@ Categorização (binning monotônico) + WOE — sempre a **última** etapa antes
 da pré-seleção/treinamento, porque é aqui que as versões alternativas de
 cada variável (`_woe`, `_log`, `_bin`, etc.) nascem.
 
-**Por que Esfera 2 vem antes**: as transformações de potência só existem a
-partir daqui — nesse ponto do funil o GBM da Esfera 2 nunca viu `idade` e
+**Por que Interação vem antes**: as transformações de potência só existem a
+partir daqui — nesse ponto do funil o GBM da Interação nunca viu `idade` e
 `idade_log` ao mesmo tempo, então não precisa de filtro extra para evitar
 regra redundante entre escalas da mesma variável.
 
@@ -271,7 +282,7 @@ Para cada coluna (exceto `y`):
   de renda é rejeitado por negócio mesmo que estatisticamente válido (ver
   `docs/literatura/categorizacao.md`, seção "Conexão com o acervo").
 - **Categórica/binária** (texto, ou numérica com só 2 valores — ex.: uma
-  flag 0/1 de regra da Esfera 2): sem binning, cada valor já é o "bin".
+  flag 0/1 de regra da Interação): sem binning, cada valor já é o "bin".
   Antes da correção de 2026-07, colunas binárias eram descartadas
   silenciosamente aqui (`bins_monotonicos` numa coluna de 2 valores gera
   só 2 edges, insuficiente para discretizar) — bug real corrigido, testado
@@ -284,7 +295,7 @@ em scorecards de crédito) ajustado **só em dev**, reaplicado em teste.
 
 | Parâmetro | Tipo | Default | Explicação |
 |---|---|---|---|
-| `df_dev`, `df_teste` | `DataFrame` | — | Bases de entrada (saída de Esfera 1/2/Construção, ou direto de `divisao`). |
+| `df_dev`, `df_teste` | `DataFrame` | — | Bases de entrada (saída de Agregação temporal/Interação/Construção, ou direto de `divisao`). |
 | `gerar_transformacoes_potencia` | `bool` | `True` | Gera também log/raiz/quad/cubo/inversas como candidatas extras — o Pedro_Wise (nível 1, `transformacao_simples`) testa trocar a versão WOE por uma dessas via a semântica de "base" (mesmo prefixo). Só numérica contínua. Descarta automaticamente transformações com domínio inválido (ex.: log de negativo) em dev OU teste. Análogo em espírito a Box-Cox/Yeo-Johnson (**Atkinson, Riani & Corbellini, 2021**, *The Box–Cox Transformation: Review and Extensions*) — aqui um catálogo fixo de expoentes em vez de um `λ` ajustado por máxima verossimilhança. |
 | `gerar_bin_ordinal` | `bool` | `True` | Gera também o índice do bin (faixa, como número) como candidata extra — outra "versão" da mesma base. Só numérica contínua. |
 | `ao_processar_coluna` | `Callable[[str, float], None] \| None` | `None` | Callback chamado após cada coluna processada com sucesso, recebendo `(coluna, iv)` — gancho para progresso em tempo real (ex.: `app/backend/logica.py` publica isso numa fila SSE) sem esta biblioteca precisar saber o que é uma fila ou WebSocket. |
@@ -410,10 +421,10 @@ variável, só diagnóstico pós-hoc, não influencia a seleção),
 ## Bibliografia citada
 
 - Friedman, J. H., & Popescu, B. E. (2008). *Predictive learning via rule
-  ensembles*. Annals of Applied Statistics. — base de `esfera2`.
+  ensembles*. Annals of Applied Statistics. — base de `interacao`.
 - Kanter, J. M., & Veeramachaneni, K. (2015). *Deep feature synthesis:
   Towards automating data science endeavors*. — vocabulário de primitivas
-  de `construcao`/`esfera1`.
+  de `construcao`/`agregacao_temporal`.
 - Navas-Palencia, G. (2020). *Optimal binning: mathematical programming
   formulation*. arXiv:2001.08025. — inspiração de `bins_monotonicos` em
   `categorizar`.
