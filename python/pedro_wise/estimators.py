@@ -5,11 +5,13 @@ por sklearn, boosting, etc. sem tocar `selection.py`).
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from statsmodels.tools.sm_exceptions import PerfectSeparationWarning
 
 
 @dataclass(frozen=True)
@@ -54,5 +56,16 @@ class LogisticGLM:
     def fit(self, X: pd.DataFrame, y: pd.Series) -> _FittedGLM:
         variables = tuple(X.columns)
         X_design = sm.add_constant(X, has_constant="add")
-        result = sm.GLM(y, X_design, family=sm.families.Binomial()).fit()
+        # a busca stepwise ajusta centenas de candidatas por rodada -- boa
+        # parte é combinação ruim de variáveis (separação perfeita, ou
+        # coeficiente explodindo) que o próprio critério de KS descarta
+        # duas linhas depois. Em notebook/Jupyter, milhares desses warnings
+        # disparados em sequência enchem o canal iopub mais rápido do que
+        # ele drena e o kernel trava com "IOStream.flush timed out" --
+        # silenciamos aqui porque são ruído esperado do processo de busca,
+        # não um erro real (a variável simplesmente não sobrevive).
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=PerfectSeparationWarning)
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            result = sm.GLM(y, X_design, family=sm.families.Binomial()).fit()
         return _FittedGLM(_result=result, variables=variables)
