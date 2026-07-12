@@ -281,6 +281,7 @@ def _descobrir(
     max_regras: int,
     permitir_cruzamento_entre_bases: bool,
     semente: int = 0,
+    proporcao_variaveis_por_split: float | None = None,
 ) -> dict[str, Any]:
     """Esfera 2 + validação out-of-time, empacotado pra API. Não depende de
     nada de painel/agregação -- roda sobre qualquer par (X, y) já dividido
@@ -296,6 +297,7 @@ def _descobrir(
         max_regras=max_regras,
         semente=semente,
         permitir_cruzamento_entre_bases=permitir_cruzamento_entre_bases,
+        proporcao_variaveis_por_split=proporcao_variaveis_por_split,
     )
     regras_empacotadas: list[dict[str, Any]] = []
     if regras:
@@ -349,6 +351,29 @@ def rodar_agregacao(
     }
 
 
+def _dividir_dev_teste(
+    df: pd.DataFrame,
+    metodo_split: Literal["aleatorio", "coluna"],
+    semente: int,
+    coluna_split: str | None = None,
+    valores_dev: list[str] | None = None,
+    valores_teste: list[str] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Reaproveita as mesmas funções de split do fluxo de preparar dataset
+    do Pedro_Wise (`ingestao.py`) -- nenhuma lógica de split nova aqui."""
+    from ingestao import dividir_aleatorio, dividir_por_amostra_existente
+
+    if metodo_split == "coluna":
+        if not coluna_split or not valores_dev or not valores_teste:
+            raise ValueError(
+                "Informe coluna_split, valores_dev e valores_teste pro split por coluna existente"
+            )
+        if coluna_split not in df.columns:
+            raise ValueError(f"Coluna de split '{coluna_split}' não existe na tabela")
+        return dividir_por_amostra_existente(df, coluna_split, valores_dev, valores_teste)
+    return dividir_aleatorio(df, proporcao_teste=0.5, semente=semente)
+
+
 def descobrir_em_tabela(
     registros: list[dict[str, Any]],
     colunas_x: list[str],
@@ -360,10 +385,16 @@ def descobrir_em_tabela(
     permitir_cruzamento_entre_bases: bool = True,
     semente: int = 0,
     coluna_y: str = "y",
+    proporcao_variaveis_por_split: float | None = None,
+    metodo_split: Literal["aleatorio", "coluna"] = "aleatorio",
+    coluna_split: str | None = None,
+    valores_dev: list[str] | None = None,
+    valores_teste: list[str] | None = None,
 ) -> dict[str, Any]:
     """Esfera 2 sobre uma tabela já em mãos (tipicamente a saída de
     `rodar_agregacao`) -- reconstrói o DataFrame, faz o split dev/teste
-    (aleatório, seedado) e roda `_descobrir`."""
+    (aleatório por padrão, ou por uma coluna de amostra já existente na
+    base) e roda `_descobrir`."""
     if not colunas_x:
         raise ValueError("Selecione ao menos uma coluna candidata")
     if coluna_y not in (registros[0] if registros else {}):
@@ -372,9 +403,7 @@ def descobrir_em_tabela(
     df = pd.DataFrame.from_records(registros)
     if coluna_y != "y":
         df = df.rename(columns={coluna_y: "y"})
-    rng_split = df.sample(frac=1, random_state=semente)
-    metade = len(rng_split) // 2
-    dev, teste = rng_split.iloc[:metade], rng_split.iloc[metade:]
+    dev, teste = _dividir_dev_teste(df, metodo_split, semente, coluna_split, valores_dev, valores_teste)
 
     return _descobrir(
         dev[colunas_x],
@@ -388,6 +417,7 @@ def descobrir_em_tabela(
         max_regras,
         permitir_cruzamento_entre_bases,
         semente,
+        proporcao_variaveis_por_split,
     )
 
 
@@ -401,6 +431,7 @@ def rodar_direto(
     max_regras: int = 10,
     permitir_cruzamento_entre_bases: bool = True,
     coluna_y: str = "y",
+    proporcao_variaveis_por_split: float | None = None,
 ) -> dict[str, Any]:
     """Modo direto: pula a esfera 1 -- usa um dataset já flat (mesmo
     dev.csv/teste.csv do Pedro_Wise, já com split dev/teste pronto) direto
@@ -429,4 +460,5 @@ def rodar_direto(
         max_suporte,
         max_regras,
         permitir_cruzamento_entre_bases,
+        proporcao_variaveis_por_split=proporcao_variaveis_por_split,
     )

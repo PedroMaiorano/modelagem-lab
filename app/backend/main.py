@@ -470,6 +470,11 @@ class ConfigDescobrir(BaseModel):
     max_regras: int = 10
     permitir_cruzamento_entre_bases: bool = True
     coluna_y: str = "y"
+    proporcao_variaveis_por_split: float | None = None
+    metodo_split: Literal["aleatorio", "coluna"] = "aleatorio"
+    coluna_split: str | None = None
+    valores_dev: list[str] | None = None
+    valores_teste: list[str] | None = None
 
 
 @app.post("/api/feature-lab/descobrir")
@@ -487,6 +492,11 @@ def rota_descobrir_em_tabela(config: ConfigDescobrir) -> dict[str, Any]:
             max_regras=config.max_regras,
             permitir_cruzamento_entre_bases=config.permitir_cruzamento_entre_bases,
             coluna_y=config.coluna_y,
+            proporcao_variaveis_por_split=config.proporcao_variaveis_por_split,
+            metodo_split=config.metodo_split,
+            coluna_split=config.coluna_split,
+            valores_dev=config.valores_dev,
+            valores_teste=config.valores_teste,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -502,6 +512,7 @@ class ConfigDireto(BaseModel):
     max_regras: int = 10
     permitir_cruzamento_entre_bases: bool = True
     coluna_y: str = "y"
+    proporcao_variaveis_por_split: float | None = None
 
 
 @app.post("/api/feature-lab/direto")
@@ -519,6 +530,7 @@ def rota_rodar_direto(config: ConfigDireto) -> dict[str, Any]:
             max_regras=config.max_regras,
             permitir_cruzamento_entre_bases=config.permitir_cruzamento_entre_bases,
             coluna_y=config.coluna_y,
+            proporcao_variaveis_por_split=config.proporcao_variaveis_por_split,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

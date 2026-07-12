@@ -146,3 +146,44 @@ def test_nao_devolve_quase_duplicatas_de_limiar():
 
     assinaturas = [frozenset((c.feature, c.operador) for c in r.condicoes) for r in regras]
     assert len(assinaturas) == len(set(assinaturas))
+
+
+def test_proporcao_variaveis_por_split_deixa_variavel_fraca_aparecer():
+    """Feedback real: uma variável muito mais forte que as outras pode
+    "sufocar" o espaço de splits -- toda árvore vence a disputa nela, e
+    interações envolvendo variáveis mais fracas nunca chegam a ser
+    testadas. Cenário: 4 variáveis fortes (isoladas) + uma interação fraca
+    entre duas variáveis fracas -- sem `proporcao_variaveis_por_split`, a
+    interação fraca não aparece em NENHUMA regra; limitando as variáveis
+    candidatas por split, ela aparece em boa parte das regras.
+    """
+    rng = np.random.default_rng(5)
+    n = 6000
+    fortes = {f"forte{i}": rng.normal(0, 1, n) for i in range(4)}
+    fraca1 = rng.normal(0, 1, n)
+    fraca2 = rng.normal(0, 1, n)
+
+    logit_p = sum(2.5 * v for v in fortes.values()) + 1.3 * ((fraca1 > 0) & (fraca2 > 0)).astype(float)
+    p = 1 / (1 + np.exp(-logit_p))
+    y = pd.Series(rng.binomial(1, p))
+    X = pd.DataFrame({**fortes, "fraca1": fraca1, "fraca2": fraca2})
+
+    def _n_regras_com_variavel_fraca(regras: list[Regra]) -> int:
+        return sum(1 for r in regras if any(c.feature in ("fraca1", "fraca2") for c in r.condicoes))
+
+    sem_limite = extrair_candidatas(
+        X, y, profundidade_maxima=2, n_arvores=40, max_regras=200, semente=0, min_suporte=0.01
+    )
+    com_limite = extrair_candidatas(
+        X,
+        y,
+        profundidade_maxima=2,
+        n_arvores=40,
+        max_regras=200,
+        semente=0,
+        min_suporte=0.01,
+        proporcao_variaveis_por_split=0.3,
+    )
+
+    assert _n_regras_com_variavel_fraca(sem_limite) == 0
+    assert _n_regras_com_variavel_fraca(com_limite) > 0

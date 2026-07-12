@@ -81,6 +81,11 @@ export default function FeatureLabPagina() {
   const [maxSuporte, setMaxSuporte] = useState(0.5);
   const [maxRegras, setMaxRegras] = useState(20);
   const [permitirCruzamento, setPermitirCruzamento] = useState(true);
+  const [proporcaoVariaveis, setProporcaoVariaveis] = useState<string>("");
+  const [metodoSplit, setMetodoSplit] = useState<"aleatorio" | "coluna">("aleatorio");
+  const [colunaSplit, setColunaSplit] = useState("");
+  const [valoresDevTexto, setValoresDevTexto] = useState("");
+  const [valoresTesteTexto, setValoresTesteTexto] = useState("");
   const [rodandoEsfera2, setRodandoEsfera2] = useState(false);
   const [resultado, setResultado] = useState<ResultadoFeatureLab | null>(null);
 
@@ -209,6 +214,7 @@ export default function FeatureLabPagina() {
 
     setRodandoEsfera2(true);
     setErro(null);
+    const proporcao = proporcaoVariaveis.trim() === "" ? null : Number(proporcaoVariaveis);
     const parametros = {
       profundidade_maxima: profundidadeMaxima,
       n_arvores: nArvores,
@@ -217,17 +223,33 @@ export default function FeatureLabPagina() {
       max_regras: maxRegras,
       permitir_cruzamento_entre_bases: permitirCruzamento,
       coluna_y: colunaY,
+      proporcao_variaveis_por_split: proporcao,
     };
+    const usaRodarDireto = fonteEsfera2 === "bruta" && base.tipo === "flat";
+    const paramsSplit =
+      !usaRodarDireto && metodoSplit === "coluna"
+        ? {
+            metodo_split: "coluna" as const,
+            coluna_split: colunaSplit,
+            valores_dev: valoresDevTexto.split(",").map((s) => s.trim()).filter(Boolean),
+            valores_teste: valoresTesteTexto.split(",").map((s) => s.trim()).filter(Boolean),
+          }
+        : {};
     try {
       let r: ResultadoFeatureLab;
       if (fonteEsfera2 === "esfera1") {
         if (!resultadoEsfera1) throw new Error("Rode a esfera 1 primeiro, ou troque a fonte pra 'colunas cruas'.");
-        r = await descobrirEmTabela({ tabela: resultadoEsfera1.tabela, colunas_x: [...colunasX], ...parametros });
-      } else if (base.tipo === "flat") {
+        r = await descobrirEmTabela({
+          tabela: resultadoEsfera1.tabela,
+          colunas_x: [...colunasX],
+          ...parametros,
+          ...paramsSplit,
+        });
+      } else if (usaRodarDireto) {
         r = await rodarDireto({ dataset: base.nome, colunas_x: [...colunasX], ...parametros });
       } else {
         const bruta = await carregarBaseBruta(base.nome, base.tipo, colunaY);
-        r = await descobrirEmTabela({ tabela: bruta.tabela, colunas_x: [...colunasX], ...parametros });
+        r = await descobrirEmTabela({ tabela: bruta.tabela, colunas_x: [...colunasX], ...parametros, ...paramsSplit });
       }
       setResultado(r);
     } catch (e) {
@@ -248,6 +270,22 @@ export default function FeatureLabPagina() {
   function aoLimparEsfera1() {
     setResultadoEsfera1(null);
     setFonteEsfera2("bruta");
+  }
+
+  function aoLimparTudo() {
+    setBase(null);
+    setColunaY("y");
+    setResultadoEsfera1(null);
+    setResultado(null);
+    setFonteEsfera2("bruta");
+    setColunasX(new Set());
+    setProporcaoVariaveis("");
+    setMetodoSplit("aleatorio");
+    setColunaSplit("");
+    setValoresDevTexto("");
+    setValoresTesteTexto("");
+    setErro(null);
+    setAba("esfera1");
   }
 
   // Qual variável bruta originou uma coluna gerada -- o nome já entrega
@@ -272,6 +310,9 @@ export default function FeatureLabPagina() {
     (a, b) => (resultadoEsfera1?.ivs_originais[b] ?? 0) - (resultadoEsfera1?.ivs_originais[a] ?? 0),
   );
   const colunasParaEsfera2 = fonteEsfera2 === "esfera1" ? (resultadoEsfera1?.colunas_geradas ?? []) : colunasNumericasBase;
+  // rodarDireto já usa o dev.csv/teste.csv que o usuário preparou na aba
+  // Dataset do Pedro_Wise -- não faz sentido oferecer split de novo aqui.
+  const usaRodarDireto = fonteEsfera2 === "bruta" && base?.tipo === "flat";
 
   const regrasFiltradas: RegraFeatureLab[] = (resultado?.regras ?? [])
     .filter((r) => r.iv_teste >= ivMinimo)
@@ -289,8 +330,10 @@ export default function FeatureLabPagina() {
         base={base}
         aoMudarBase={setBase}
         aoEnviarPainel={aoEnviarPainel}
+        colunasBase={colunasBase}
         colunaY={colunaY}
         aoMudarColunaY={setColunaY}
+        aoLimparTudo={aoLimparTudo}
       />
 
       <main className="flex-1 overflow-y-auto p-6">
@@ -474,8 +517,8 @@ export default function FeatureLabPagina() {
                     </div>
 
                     <p className="mb-4 text-xs text-slate-500">
-                      Variável resposta: <span className="font-mono text-slate-300">y</span> — convenção
-                      fixa do lab (não configurável).
+                      Variável resposta: <span className="font-mono text-slate-300">{colunaY}</span> (configurável
+                      na barra lateral).
                       {resultadoEsfera1.taxa_evento !== null &&
                         ` Taxa de evento: ${(resultadoEsfera1.taxa_evento * 100).toFixed(1)}%.`}
                     </p>
@@ -663,7 +706,29 @@ export default function FeatureLabPagina() {
                       className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
                     />
                   </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-500">variáveis por split</label>
+                    <input
+                      type="number"
+                      step={0.1}
+                      min={0}
+                      max={1}
+                      value={proporcaoVariaveis}
+                      onChange={(e) => setProporcaoVariaveis(e.target.value)}
+                      placeholder="todas"
+                      className="w-full rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                    />
+                  </div>
                 </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  <span className="text-slate-400">suporte mínimo/máximo</span>: fração de linhas que precisa
+                  satisfazer a regra pra ela contar — muito raro (abaixo do mínimo) é ruído/overfit de poucos
+                  casos, muito comum (acima do máximo) não discrimina nada.{" "}
+                  <span className="text-slate-400">variáveis por split</span>: em branco, toda árvore considera
+                  todas as colunas em cada split — se uma variável for bem mais forte que as outras, ela domina
+                  toda árvore e combinações com variáveis mais fracas nunca chegam a ser testadas. Um valor tipo
+                  0.5-0.7 limita cada split a uma amostra aleatória das colunas, dando chance às mais fracas.
+                </p>
                 <label className="mt-4 flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
                   <input
                     type="checkbox"
@@ -677,6 +742,78 @@ export default function FeatureLabPagina() {
                   Desmarcado: cada regra só combina primitivas da mesma variável bruta — útil se regra de
                   negócio não quer misturar domínios diferentes numa condição só.
                 </p>
+
+                {!usaRodarDireto && (
+                  <div className="mt-4 border-t border-slate-800 pt-4">
+                    <p className="mb-1.5 text-[11px] text-slate-500">split treino/teste</p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setMetodoSplit("aleatorio")}
+                        className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                          metodoSplit === "aleatorio"
+                            ? "border-emerald-600 bg-emerald-950/40 text-emerald-300"
+                            : "border-slate-700 bg-slate-800/60 text-slate-400 hover:text-slate-200"
+                        }`}
+                      >
+                        aleatório (50/50)
+                      </button>
+                      <button
+                        onClick={() => setMetodoSplit("coluna")}
+                        className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                          metodoSplit === "coluna"
+                            ? "border-emerald-600 bg-emerald-950/40 text-emerald-300"
+                            : "border-slate-700 bg-slate-800/60 text-slate-400 hover:text-slate-200"
+                        }`}
+                      >
+                        coluna de amostra existente
+                      </button>
+                    </div>
+
+                    {metodoSplit === "coluna" && (
+                      <div className="mt-3 flex flex-wrap items-end gap-3">
+                        <div>
+                          <label className="mb-1 block text-[11px] text-slate-500">coluna</label>
+                          <select
+                            value={colunaSplit}
+                            onChange={(e) => setColunaSplit(e.target.value)}
+                            className="rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                          >
+                            <option value="">selecione…</option>
+                            {colunasBase.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-slate-500">
+                            valores = treino (separados por vírgula)
+                          </label>
+                          <input
+                            type="text"
+                            value={valoresDevTexto}
+                            onChange={(e) => setValoresDevTexto(e.target.value)}
+                            placeholder="dev,treino"
+                            className="w-40 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] text-slate-500">
+                            valores = teste (separados por vírgula)
+                          </label>
+                          <input
+                            type="text"
+                            value={valoresTesteTexto}
+                            onChange={(e) => setValoresTesteTexto(e.target.value)}
+                            placeholder="teste,oot"
+                            className="w-40 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 text-sm text-slate-100"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <button
                   onClick={aoRodarEsfera2}

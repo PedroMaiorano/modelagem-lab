@@ -92,6 +92,7 @@ def extrair_candidatas(
     semente: int | None = 0,
     permitir_cruzamento_entre_bases: bool = True,
     base_de: Callable[[str], str] = extrair_base_agregado,
+    proporcao_variaveis_por_split: float | None = None,
 ) -> list[Regra]:
     """Treina um `GradientBoostingClassifier` raso sobre `X`/`y` e extrai
     regras de interação (>= 2 condições) dos caminhos das árvores.
@@ -121,11 +122,21 @@ def extrair_candidatas(
       limiar), senão a tabela final fica cheia de linhas quase idênticas;
     - ranking por IV (via `transformacao.woe.ajustar_woe`, tratando a regra
       como variável binária), truncado em `max_regras`.
+
+    `proporcao_variaveis_por_split`: sem isso (`None`), toda árvore vê todas
+    as colunas em cada split -- se uma variável for muito mais forte que as
+    outras, ela vence a disputa em praticamente toda árvore, e combinações
+    envolvendo variáveis mais fracas nunca chegam a ser testadas (a árvore
+    nem cogita usá-las). É o mesmo problema que motiva o `max_features` do
+    Random Forest. Um valor tipo `0.5`-`0.7` limita cada split a uma amostra
+    aleatória das colunas, dando chance de variáveis mais fracas aparecerem
+    em algumas árvores mesmo com uma dominante no conjunto.
     """
     gbm = GradientBoostingClassifier(
         n_estimators=n_arvores,
         max_depth=profundidade_maxima,
         subsample=0.8,
+        max_features=proporcao_variaveis_por_split,
         random_state=semente,
     )
     gbm.fit(X, y)

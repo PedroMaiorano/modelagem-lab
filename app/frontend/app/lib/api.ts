@@ -429,11 +429,16 @@ export interface ParametrosEsfera2 {
   max_regras: number;
   permitir_cruzamento_entre_bases: boolean;
   coluna_y: string;
+  proporcao_variaveis_por_split?: number | null;
 }
 
 export interface ConfigDescobrir extends ParametrosEsfera2 {
   tabela: Record<string, unknown>[];
   colunas_x: string[];
+  metodo_split?: "aleatorio" | "coluna";
+  coluna_split?: string;
+  valores_dev?: string[];
+  valores_teste?: string[];
 }
 
 export interface ConfigDireto extends ParametrosEsfera2 {
