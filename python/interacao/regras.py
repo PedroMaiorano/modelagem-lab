@@ -107,7 +107,12 @@ def extrair_candidatas(
     troque se suas colunas seguirem outra convenção.
 
     Filtros aplicados, nessa ordem:
-    - só caminhos com 2+ condições (interação de verdade, não univariado);
+    - só caminhos com 2+ condições **sobre 2+ variáveis distintas** --
+      uma árvore CART pode cortar a mesma coluna duas vezes no mesmo
+      caminho (um corte perto da raiz, outro mais fino depois, refinando
+      a mesma variável); isso teria 2+ condições mas é só binning
+      univariado disfarçado (o corte mais apertado já implica o outro),
+      não a interação que esta função existe pra achar;
     - se `permitir_cruzamento_entre_bases=False`, descarta caminhos cujas
       condições vêm de mais de uma base;
     - deduplicação exata (a mesma regra, mesmo limiar, pode aparecer em
@@ -148,6 +153,12 @@ def extrair_candidatas(
     for arvore in gbm.estimators_[:, 0]:
         for caminho in _caminhos_da_arvore(arvore.tree_, colunas):
             if len(caminho) < 2:
+                continue
+            if len({c.feature for c in caminho}) < 2:
+                # Mesma variável cortada 2+ vezes no caminho (ex.: x>28.5
+                # E x>57.5) -- o corte mais apertado já implica o mais
+                # frouxo, então isso é só um bin univariado com 2 nomes,
+                # não uma interação real entre variáveis diferentes.
                 continue
             if not permitir_cruzamento_entre_bases:
                 bases = {base_de(c.feature) for c in caminho}

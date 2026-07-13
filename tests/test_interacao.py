@@ -148,6 +148,29 @@ def test_nao_devolve_quase_duplicatas_de_limiar():
     assert len(assinaturas) == len(set(assinaturas))
 
 
+def test_nenhuma_regra_repete_a_mesma_variavel():
+    """Bug real: uma árvore pode cortar a mesma variável duas vezes no
+    mesmo caminho (ex.: x>28.5 depois x>57.5, refinando o mesmo corte) --
+    isso passa no filtro de "2+ condições" mas não é interação nenhuma, só
+    binning univariado disfarçado (o corte mais apertado já implica o
+    outro). Cenário: uma variável dominante (`x`) e uma fraca/irrelevante
+    (`ruido`) -- profundidade 3 dá espaço de sobra pra árvore cortar `x`
+    mais de uma vez no mesmo ramo. Nenhuma regra devolvida deve usar menos
+    de 2 variáveis distintas.
+    """
+    rng = np.random.default_rng(6)
+    n = 3000
+    x = rng.normal(0, 1, n)
+    ruido = rng.normal(0, 1, n)
+    p = 1 / (1 + np.exp(-(3.0 * x)))
+    y = pd.Series(rng.binomial(1, p))
+    X = pd.DataFrame({"x": x, "ruido": ruido})
+
+    regras = extrair_candidatas(X, y, profundidade_maxima=3, n_arvores=40, min_suporte=0.01, semente=6)
+    for regra in regras:
+        assert len({c.feature for c in regra.condicoes}) >= 2
+
+
 def test_proporcao_variaveis_por_split_deixa_variavel_fraca_aparecer():
     """Feedback real: uma variável muito mais forte que as outras pode
     "sufocar" o espaço de splits -- toda árvore vence a disputa nela, e
