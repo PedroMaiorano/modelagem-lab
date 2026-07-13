@@ -21,19 +21,12 @@ pra pegar a tag mais recente, caso este README esteja desatualizado. Pra
 desenvolvimento local (clone editável): `pip install -e .`. Cada tag `vX.Y.Z`
 builda e publica o wheel automaticamente via `.github/workflows/release.yml`.
 
-## 8 módulos de modelagem (costurados num funil por `pipeline_lab`)
+## Uso rápido
 
-```
-divisao → construcao (opc.) → agregacao_temporal (opc.) → interacao (opc.)
-   → categorizacao+transformacao → preselecao (opc.) → pedro_wise
-```
-
-`python/pipeline_lab/` é a orquestração: coleção de funções soltas que
-compõem os módulos-núcleo na ordem certa, sempre sobre um
-`pandas.DataFrame` — ver [`python/pipeline_lab/REFERENCIA.md`](python/pipeline_lab/REFERENCIA.md)
-para toda função pública, parâmetro e a literatura que justifica cada
-decisão. Pra consumir o funil sem desempacotar o retorno de cada etapa na
-mão, use `Esteira` (builder encadeável):
+Ponto de entrada único: `Esteira`, um builder encadeável que compõe o funil
+completo (divisão → construção → agregação temporal → interação →
+categorização/WOE → pré-seleção → Pedro_Wise) sobre um `pandas.DataFrame`
+qualquer, sem precisar desempacotar o retorno de cada etapa na mão:
 
 ```python
 from modelagem_lab import Esteira
@@ -46,8 +39,35 @@ resultado = (
     .pre_selecionar(limiar_iv=0.02)
     .treinar(criterio="teste")
 )
-print(resultado.variaveis, resultado.ks_teste)
+
+print(resultado.variaveis)      # variáveis selecionadas
+print(resultado.ks_teste)       # KS no teste
+print(resultado.coeficientes)   # coeficientes do GLM
 ```
+
+Cada etapa é opcional (exceto `dividir_*` e `categorizar_e_transformar`) e
+tem seus hiperparâmetros como argumentos nomeados — ver
+[`python/pipeline_lab/REFERENCIA.md`](python/pipeline_lab/REFERENCIA.md) pra
+cada parâmetro, e
+[`notebooks/pipeline_lab_case_churn.ipynb`](notebooks/pipeline_lab_case_churn.ipynb)
+pra um case completo, célula a célula.
+
+Se preferir o estilo funcional (cada etapa como função solta, sem o
+builder), os 8 módulos continuam acessíveis via `ml.pedro_wise`,
+`ml.categorizacao` etc. — ver a docstring de `python/pipeline_lab/__init__.py`.
+
+## 8 módulos de modelagem (costurados num funil por `pipeline_lab`)
+
+```
+divisao → construcao (opc.) → agregacao_temporal (opc.) → interacao (opc.)
+   → categorizacao+transformacao → preselecao (opc.) → pedro_wise
+```
+
+`python/pipeline_lab/` é a orquestração: coleção de funções soltas que
+compõem os módulos-núcleo na ordem certa, sempre sobre um
+`pandas.DataFrame` — ver [`python/pipeline_lab/REFERENCIA.md`](python/pipeline_lab/REFERENCIA.md)
+para toda função pública, parâmetro e a literatura que justifica cada
+decisão (exemplo de uso via `Esteira` na seção acima).
 
 1. **Construção** (`python/construcao/`) — razões/diferenças entre variáveis (escopo v1 deliberadamente mínimo).
 2. **Agregação temporal** (`python/agregacao_temporal/`) — primitivas de janela móvel sobre painel (máximo/média/mínimo/desvio-padrão/tendência), sem look-ahead, preservando o split dev/teste — behavioral scoring.
