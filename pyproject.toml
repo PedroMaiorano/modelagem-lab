@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "modelagem-lab"
-version = "0.3.0"
+version = "0.3.1"
 description = "Núcleo de modelagem de risco de crédito -- agregação temporal, descoberta de interação (RuleFit-style), categorização/WOE, pré-seleção e Pedro_Wise (seleção stepwise). Ver modelagem_lab/pipeline_lab pra montar o funil completo em cima de um DataFrame (Esteira encadeável ou funções soltas)."
 requires-python = ">=3.11"
 dependencies = [
