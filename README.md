@@ -4,6 +4,23 @@ Laboratório pessoal de ciência de dados: modelagem estatística e ML em **Pyth
 técnicas clássicas e SOTA. Agnóstico de domínio (risco de crédito é caso de uso, não
 único foco).
 
+## Instalação
+
+```bash
+# Databricks / notebook (%pip) ou terminal (pip) -- última release publicada
+pip install https://github.com/PedroMaiorano/modelagem-lab/releases/download/v0.3.0/modelagem_lab-0.3.0-py3-none-any.whl
+```
+
+```python
+import modelagem_lab as ml   # namespace único -- ml.pedro_wise, ml.categorizacao, ml.Esteira, ...
+```
+
+Repositório público, sem necessidade de token/login pra baixar. Confira a
+[página de Releases](https://github.com/PedroMaiorano/modelagem-lab/releases)
+pra pegar a tag mais recente, caso este README esteja desatualizado. Pra
+desenvolvimento local (clone editável): `pip install -e .`. Cada tag `vX.Y.Z`
+builda e publica o wheel automaticamente via `.github/workflows/release.yml`.
+
 ## 8 módulos de modelagem (costurados num funil por `pipeline_lab`)
 
 ```
@@ -65,23 +82,6 @@ notebooks/     exploração ad-hoc
 .claude/       configuração Claude Code (agents, skills, hooks)
 .github/       workflow de release (build + publica wheel/sdist na tag)
 ```
-
-## Instalação (como biblioteca, fora do repo)
-
-```bash
-# por release (recomendado -- sem clonar/buildar o repo a cada instalação)
-pip install https://github.com/PedroMaiorano/modelagem-lab/releases/download/vX.Y.Z/modelagem_lab-X.Y.Z-py3-none-any.whl
-
-# local, editável (clone do repo)
-pip install -e .
-```
-
-```python
-import modelagem_lab as ml   # namespace único -- ml.pedro_wise, ml.categorizacao, ml.Esteira, ...
-```
-
-Ver `.github/workflows/release.yml`: cada tag `vX.Y.Z` builda e publica o
-wheel automaticamente na Release correspondente.
 
 ## Começando
 - Config e comportamento: ver [`CLAUDE.md`](CLAUDE.md).
