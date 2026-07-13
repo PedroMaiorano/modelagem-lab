@@ -87,6 +87,17 @@ def test_agregar_temporal_reduz_painel_a_uma_linha_por_chave() -> None:
     assert "dias_atraso_media_3m" in esteira.colunas_geradas["agregacao_temporal"]
 
 
+def test_categorizar_preenche_iv_teste_por_variavel() -> None:
+    df = _dataset_flat()
+    esteira = Esteira.dividir_por_amostra(
+        df, coluna_amostra="amostra", valores_dev=["train"], valores_teste=["test"], coluna_y="Churn"
+    )
+    esteira.categorizar_e_transformar()
+
+    assert esteira.iv_teste_por_variavel is not None
+    assert set(esteira.iv_teste_por_variavel) == set(esteira.iv_por_variavel)
+
+
 def test_dividir_aleatorio_funciona_como_ponto_de_entrada() -> None:
     df = pd.DataFrame({"x": range(100), "y": [0, 1] * 50})
     esteira = Esteira.dividir_aleatorio(df, proporcao_teste=0.3, semente=7)

@@ -103,17 +103,65 @@ def ajustar_woe(bin_idx: pd.Series, y: pd.Series, suavizacao: float = 0.5) -> Ta
     )
 
 
-def aplicar_woe(bin_idx: pd.Series, tabela: TabelaWOE) -> pd.Series:
+def aplicar_woe(bin_idx: pd.Series, tabela: TabelaWOE, nome_coluna: str | None = None) -> pd.Series:
     """Mapeia cada bin para seu WOE ajustado. Bins presentes aqui mas
     ausentes na tabela ajustada (categoria nova em teste/produção que não
     apareceu no dev) recebem WOE=0 (neutro) — não descartam a linha, mas
     também não inventam informação que a tabela de dev não tinha.
+
+    `nome_coluna`, se passado, aparece no aviso de bin ausente -- sem isso,
+    com centenas de colunas candidatas (ex.: construção automática de
+    razões), o aviso soa mas não dá pra saber qual delas é a degenerada.
     """
     mapeado = bin_idx.map(tabela.woe_por_bin)
     n_ausentes = mapeado.isna().sum() - bin_idx.isna().sum()
     if n_ausentes > 0:
-        logger.warning("%d valor(es) com bin ausente da tabela de WOE — atribuído WOE=0", n_ausentes)
+        if nome_coluna is not None:
+            logger.warning(
+                "%d valor(es) com bin ausente da tabela de WOE em '%s' — atribuído WOE=0",
+                n_ausentes,
+                nome_coluna,
+            )
+        else:
+            logger.warning("%d valor(es) com bin ausente da tabela de WOE — atribuído WOE=0", n_ausentes)
     return mapeado.fillna(0.0)
+
+
+def avaliar_iv(bin_idx: pd.Series, y: pd.Series, tabela: TabelaWOE) -> float:
+    """IV de um conjunto novo (ex.: teste) usando os WOEs já ajustados em
+    `tabela` (de outro conjunto, ex.: dev) -- nunca recalcula WOE aqui, só
+    mede a separação real que esses WOEs alcançam neste `y`. Útil para
+    comparar IV-dev vs. IV-teste: uma variável com IV alto em dev e baixo
+    aqui é sinal de bin overfitado no dev, não de poder preditivo real.
+
+    Bins ausentes em `tabela` (que `aplicar_woe` já teria mapeado pra
+    WOE=0) entram com woe=0 na soma -- não contribuem ao IV, mesma
+    convenção de `aplicar_woe`. Devolve `0.0` (não levanta erro) se este
+    conjunto não tiver algum evento e algum não-evento -- mesmo padrão
+    defensivo de `interacao.estabilidade.avaliar_estabilidade`.
+
+    Usa a mesma suavização (`tabela.suavizacao`) que `ajustar_woe` aplicou
+    ao calcular `iv_total` -- sem isso, mesmo com distribuição idêntica em
+    dev e teste, os dois IVs não bateriam (proporções suavizadas vs. cruas).
+    """
+    df = pd.DataFrame({"bin": bin_idx, "y": y}).dropna(subset=["bin"])
+    agrupado: pd.DataFrame = df.groupby("bin", observed=True)["y"].agg(
+        count="count", count_evento="sum"
+    )  # type: ignore[assignment]
+    agrupado["count_nao_evento"] = agrupado["count"] - agrupado["count_evento"]
+
+    total_evento = agrupado["count_evento"].sum()
+    total_nao_evento = agrupado["count_nao_evento"].sum()
+    if total_evento == 0 or total_nao_evento == 0:
+        return 0.0
+
+    suavizacao = tabela.suavizacao
+    prop_evento = (agrupado["count_evento"] + suavizacao) / (total_evento + suavizacao * len(agrupado))
+    prop_nao_evento = (agrupado["count_nao_evento"] + suavizacao) / (
+        total_nao_evento + suavizacao * len(agrupado)
+    )
+    woe = agrupado.index.to_series().map(tabela.woe_por_bin).fillna(0.0)
+    return float(((prop_nao_evento - prop_evento) * woe).sum())
 
 
 def classificar_iv(iv_total: float) -> str:

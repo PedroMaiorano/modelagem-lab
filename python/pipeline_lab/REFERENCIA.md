@@ -300,9 +300,15 @@ em scorecards de crédito) ajustado **só em dev**, reaplicado em teste.
 | `gerar_bin_ordinal` | `bool` | `True` | Gera também o índice do bin (faixa, como número) como candidata extra — outra "versão" da mesma base. Só numérica contínua. |
 | `ao_processar_coluna` | `Callable[[str, float], None] \| None` | `None` | Callback chamado após cada coluna processada com sucesso, recebendo `(coluna, iv)` — gancho para progresso em tempo real (ex.: `app/backend/logica.py` publica isso numa fila SSE) sem esta biblioteca precisar saber o que é uma fila ou WebSocket. |
 
-Retorna `(woe_dev, woe_teste, iv_por_variavel)` — os dois primeiros
-prontos para `preselecao`/`treinamento`, o terceiro é IV por
-variável-base, a chave usada por `preselecao.pre_selecionar`.
+Retorna `ResultadoCategorizacao` (dataclass): `woe_dev`/`woe_teste` prontos
+para `preselecao`/`treinamento`; `iv_dev_por_variavel` é IV por
+variável-base, a chave usada por `preselecao.pre_selecionar`;
+`iv_teste_por_variavel` é o IV do mesmo conjunto de bases calculado no
+teste **usando os WOEs já ajustados em dev** (`transformacao.woe.avaliar_iv`,
+nunca reajusta) — diagnóstico de estabilidade: uma variável com IV alto em
+dev e muito menor em teste é sinal de bin overfitado no dev, não de poder
+preditivo real. Não influencia a pré-seleção (que filtra só por
+`iv_dev_por_variavel`).
 
 ---
 
@@ -334,7 +340,7 @@ cada um independente e opcional (`limiar=None` pula o filtro):
 | Parâmetro | Tipo | Default | Explicação |
 |---|---|---|---|
 | `colunas` | `list[str]` | — | Candidatas a filtrar. |
-| `iv_por_base` | `dict[str, float]` | — | Saída de `categorizar_e_transformar` (terceiro retorno). |
+| `iv_por_base` | `dict[str, float]` | — | `ResultadoCategorizacao.iv_dev_por_variavel`, saída de `categorizar_e_transformar`. |
 | `limiar` | `float` | `0.02` | Mantém colunas cuja variável-base tem IV >= limiar. Bases sem entrada em `iv_por_base` são tratadas como IV=0 (descartadas) — evita manter candidatas "órfãs" por engano. |
 
 ### `filtrar_correlacao(df, colunas, iv_por_base, limiar=0.9)`

@@ -52,11 +52,17 @@ intermediários) por você -- ver `pipeline_lab.esteira.Esteira`.
 
     # 5. categorização + WOE -- sempre a última etapa antes da pré-seleção
     #    /treinamento (é aqui que idade_woe, idade_log etc. nascem).
-    woe_dev, woe_teste, iv_por_variavel = categorizar.categorizar_e_transformar(df_dev, df_teste)
+    #    ResultadoCategorizacao.iv_teste_por_variavel é diagnóstico (compara
+    #    com iv_dev_por_variavel pra flagar bin overfitado), não é usado
+    #    pra filtrar nada abaixo.
+    resultado_cat = categorizar.categorizar_e_transformar(df_dev, df_teste)
+    woe_dev, woe_teste = resultado_cat.woe_dev, resultado_cat.woe_teste
 
     # 6. pré-seleção (opcional) -- variância → IV → correlação, cada
     #    limiar configurável (ou `None` pra pular o filtro).
-    resultado_selecao = preselecao.pre_selecionar(woe_dev, iv_por_variavel, limiar_iv=0.02)
+    resultado_selecao = preselecao.pre_selecionar(
+        woe_dev, resultado_cat.iv_dev_por_variavel, limiar_iv=0.02
+    )
     woe_dev = woe_dev[[*resultado_selecao["colunas_mantidas"], "y"]]
     woe_teste = woe_teste[[*resultado_selecao["colunas_mantidas"], "y"]]
 

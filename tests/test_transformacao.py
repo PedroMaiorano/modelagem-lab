@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-from transformacao import ajustar_woe, aplicar_woe, classificar_iv
+from transformacao import ajustar_woe, aplicar_woe, avaliar_iv, classificar_iv
 
 
 def test_woe_bate_com_calculo_manual():
@@ -83,6 +83,59 @@ def test_aplicar_woe_sem_vazamento_treino_teste():
     assert woe_teste.iloc[1] == pytest.approx(tabela.woe_por_bin[1])
     assert woe_teste.iloc[2] == 0.0
     assert woe_teste.iloc[3] == 0.0
+
+
+def test_aplicar_woe_inclui_nome_da_coluna_no_aviso(caplog):
+    """Com centenas de colunas candidatas (construção automática), o aviso
+    de bin ausente precisa dizer qual coluna causou -- sem `nome_coluna` a
+    mensagem fica genérica (comportamento anterior, preservado)."""
+    bin_dev = pd.Series([0] * 100 + [1] * 100)
+    y_dev = pd.Series([0] * 80 + [1] * 20 + [0] * 20 + [1] * 80)
+    tabela = ajustar_woe(bin_dev, y_dev)
+    bin_teste = pd.Series([0, 1, 2])  # bin 2 nunca apareceu no dev
+
+    with caplog.at_level("WARNING", logger="transformacao.woe"):
+        aplicar_woe(bin_teste, tabela, nome_coluna="renda_sobre_idade")
+
+    assert "renda_sobre_idade" in caplog.text
+    assert "bin ausente" in caplog.text
+
+
+def test_avaliar_iv_usa_woe_de_dev_sem_reajustar():
+    """IV de teste calculado com os WOEs já ajustados em dev -- deve bater
+    com o IV de dev quando a distribuição evento/não-evento é idêntica nos
+    dois conjuntos (mesmos bins, mesmas proporções)."""
+    bin_dev = pd.Series([0] * 100 + [1] * 100)
+    y_dev = pd.Series([0] * 80 + [1] * 20 + [0] * 20 + [1] * 80)
+    tabela = ajustar_woe(bin_dev, y_dev)
+
+    iv_teste = avaliar_iv(bin_dev, y_dev, tabela)
+    assert iv_teste == pytest.approx(tabela.iv_total, rel=1e-6)
+
+
+def test_avaliar_iv_bin_ausente_em_dev_nao_contribui():
+    """Bin que o dev nunca viu entra com woe=0 na soma -- mesma convenção
+    de `aplicar_woe` -- não quebra, só não contribui ao IV."""
+    bin_dev = pd.Series([0] * 100 + [1] * 100)
+    y_dev = pd.Series([0] * 80 + [1] * 20 + [0] * 20 + [1] * 80)
+    tabela = ajustar_woe(bin_dev, y_dev)
+
+    bin_teste = pd.Series([2] * 50)  # bin nunca visto em dev
+    y_teste = pd.Series([0] * 25 + [1] * 25)
+    assert avaliar_iv(bin_teste, y_teste, tabela) == 0.0
+
+
+def test_avaliar_iv_sem_variacao_de_y_devolve_zero():
+    """Teste sem evento (ou sem não-evento) não permite calcular IV de
+    verdade -- devolve 0.0 (sinaliza "não avaliável"), não levanta erro,
+    mesmo padrão defensivo de `interacao.estabilidade`."""
+    bin_dev = pd.Series([0] * 100 + [1] * 100)
+    y_dev = pd.Series([0] * 80 + [1] * 20 + [0] * 20 + [1] * 80)
+    tabela = ajustar_woe(bin_dev, y_dev)
+
+    bin_teste = pd.Series([0, 1, 0, 1])
+    y_teste = pd.Series([0, 0, 0, 0])  # nenhum evento
+    assert avaliar_iv(bin_teste, y_teste, tabela) == 0.0
 
 
 @pytest.mark.parametrize(

@@ -80,11 +80,16 @@ def test_fluxo_completo_ate_pedro_wise() -> None:
     df_dev, df_teste, colunas_regra = interacao.aplicar(df_dev, df_teste, n_arvores=20, max_regras=5)
     assert isinstance(colunas_regra, list)  # pode ou não achar regra, não é o ponto do teste
 
-    woe_dev, woe_teste, iv_por_variavel = categorizar.categorizar_e_transformar(df_dev, df_teste)
-    assert "y" in woe_dev.columns
-    assert len(iv_por_variavel) > 0
+    resultado_categorizacao = categorizar.categorizar_e_transformar(df_dev, df_teste)
+    assert "y" in resultado_categorizacao.woe_dev.columns
+    assert len(resultado_categorizacao.iv_dev_por_variavel) > 0
+    assert set(resultado_categorizacao.iv_teste_por_variavel) == set(
+        resultado_categorizacao.iv_dev_por_variavel
+    )
 
-    resultado = treinamento.treinar(woe_dev, woe_teste, criterio="teste")
+    resultado = treinamento.treinar(
+        resultado_categorizacao.woe_dev, resultado_categorizacao.woe_teste, criterio="teste"
+    )
     assert resultado.ks_teste >= 0.0
     assert resultado.taxa_evento_dev > 0
     assert isinstance(resultado.coeficientes, dict)

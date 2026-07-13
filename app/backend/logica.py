@@ -366,7 +366,7 @@ def _categorizar_e_transformar(
     fila: queue.Queue[dict[str, Any]],
     gerar_transformacoes_potencia: bool = True,
     gerar_bin_ordinal: bool = True,
-) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
+) -> pipeline_lab_categorizar.ResultadoCategorizacao:
     """Categorização (bins monotônicos) + transformação (WOE) — módulos
     isolados, ver `python/categorizacao/` e `python/transformacao/`. Para
     variáveis numéricas, opcionalmente também gera log/raiz/quad/cubo/
@@ -403,7 +403,7 @@ def _construir_e_transformar(
     gerar_bin_ordinal: bool = True,
     pares_customizados: list[ParConstrucao] | None = None,
     esfera2: ConfigEsfera2 = _ESFERA2_DESLIGADA,
-) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
+) -> pipeline_lab_categorizar.ResultadoCategorizacao:
     """Composição construção (+ esfera 2 opcional) → categorização →
     transformação, usada pelo pipeline "rodar tudo de uma vez"
     (`rodar_pipeline`). Os módulos também são expostos separadamente para
@@ -503,13 +503,14 @@ def rodar_categorizacao_transformacao(
     df_dev, df_teste, _ = _aplicar_esfera1(df_dev, df_teste, fila, esfera1)
     if usar_construcao:
         df_dev, df_teste, _ = _construir_e_esfera2(df_dev, df_teste, fila, pares_customizados, esfera2)
-    _, _, iv_por_variavel = _categorizar_e_transformar(
+    resultado_categorizacao = _categorizar_e_transformar(
         df_dev,
         df_teste,
         fila,
         gerar_transformacoes_potencia=gerar_transformacoes_potencia,
         gerar_bin_ordinal=gerar_bin_ordinal,
     )
+    iv_por_variavel = resultado_categorizacao.iv_dev_por_variavel
     iv_ordenado = sorted(iv_por_variavel.items(), key=lambda kv: kv[1], reverse=True)
     return {
         "n_variaveis": len(iv_por_variavel),
@@ -540,16 +541,17 @@ def rodar_pre_selecao(
     df_dev, df_teste, _ = _aplicar_esfera1(df_dev, df_teste, fila, esfera1)
     if usar_construcao:
         df_dev, df_teste, _ = _construir_e_esfera2(df_dev, df_teste, fila, pares_customizados, esfera2)
-    woe_dev, _, iv_por_variavel = _categorizar_e_transformar(
+    resultado_categorizacao = _categorizar_e_transformar(
         df_dev,
         df_teste,
         fila,
         gerar_transformacoes_potencia=gerar_transformacoes_potencia,
         gerar_bin_ordinal=gerar_bin_ordinal,
     )
+    woe_dev = resultado_categorizacao.woe_dev
     resultado = pre_selecionar(
         woe_dev,
-        iv_por_variavel,
+        resultado_categorizacao.iv_dev_por_variavel,
         limiar_variancia=limiar_variancia,
         limiar_iv=limiar_iv,
         limiar_correlacao=limiar_correlacao,
@@ -662,7 +664,7 @@ def rodar_pipeline(
     iv_por_variavel: dict[str, float] = {}
 
     if usar_pipeline_completo:
-        df_dev, df_teste, iv_por_variavel = _construir_e_transformar(
+        resultado_categorizacao = _construir_e_transformar(
             df_dev,
             df_teste,
             fila,
@@ -670,6 +672,8 @@ def rodar_pipeline(
             gerar_bin_ordinal=gerar_bin_ordinal,
             esfera2=esfera2,
         )
+        df_dev, df_teste = resultado_categorizacao.woe_dev, resultado_categorizacao.woe_teste
+        iv_por_variavel = resultado_categorizacao.iv_dev_por_variavel
         if usar_pre_selecao:
             resultado_selecao = pre_selecionar(
                 df_dev,

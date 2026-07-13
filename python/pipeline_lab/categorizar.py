@@ -8,14 +8,29 @@ esfera 2).
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from categorizacao import aplicar_bins, bins_monotonicos
-from transformacao import ajustar_woe, aplicar_woe, classificar_iv, gerar_transformacoes_fixas
+from transformacao import ajustar_woe, aplicar_woe, avaliar_iv, classificar_iv, gerar_transformacoes_fixas
 
-__all__ = ["categorizar_e_transformar", "classificar_iv"]
+__all__ = ["ResultadoCategorizacao", "categorizar_e_transformar", "classificar_iv"]
+
+
+@dataclass(frozen=True)
+class ResultadoCategorizacao:
+    woe_dev: pd.DataFrame
+    woe_teste: pd.DataFrame
+    iv_dev_por_variavel: dict[str, float]
+    iv_teste_por_variavel: dict[str, float]
+    """IV calculado no teste usando os WOEs já ajustados em dev (nunca
+    reajustados) -- ver `transformacao.woe.avaliar_iv`. Comparar com
+    `iv_dev_por_variavel`: uma variável com IV alto em dev e muito menor em
+    teste é sinal de bin overfitado em dev, não de poder preditivo real.
+    Diagnóstico apenas -- `preselecao.pre_selecionar` filtra só por
+    `iv_dev_por_variavel`."""
 
 
 def categorizar_e_transformar(
@@ -24,7 +39,7 @@ def categorizar_e_transformar(
     gerar_transformacoes_potencia: bool = True,
     gerar_bin_ordinal: bool = True,
     ao_processar_coluna: Callable[[str, float], None] | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
+) -> ResultadoCategorizacao:
     """Pra cada coluna (exceto `y`): decide numérica contínua (binning
     monotônico antes do WOE) vs. categórica/binária (cada valor já é o
     "bin", sem discretizar) e ajusta WOE (só no dev, reaplicado no teste --
@@ -39,16 +54,19 @@ def categorizar_e_transformar(
     coluna processada com sucesso -- gancho pra quem quer progresso em
     tempo real (ex.: `app/backend/logica.py` publica isso numa fila SSE)
     sem essa biblioteca precisar saber o que é uma fila ou um WebSocket.
+    `iv` aqui é sempre o IV de dev (o mesmo que vai pra
+    `iv_dev_por_variavel`) -- ver `ResultadoCategorizacao.iv_teste_por_variavel`
+    pro IV de teste, só disponível depois que a função termina.
 
-    Devolve `(woe_dev, woe_teste, iv_por_variavel)` -- os dois primeiros
-    prontos pra `pre_selecionar`/`treinar`, o terceiro é IV por variável-
-    base (chave usada por `preselecao.pre_selecionar`).
+    Devolve `ResultadoCategorizacao` -- `woe_dev`/`woe_teste` prontos pra
+    `pre_selecionar`/`treinar`.
     """
     colunas_candidatas = [c for c in df_dev.columns if c != "y"]
 
     woe_dev: dict[str, Any] = {"y": df_dev["y"]}
     woe_teste: dict[str, Any] = {"y": df_teste["y"]}
     iv_por_variavel: dict[str, float] = {}
+    iv_teste_por_variavel: dict[str, float] = {}
 
     for coluna in colunas_candidatas:
         try:
@@ -83,8 +101,9 @@ def categorizar_e_transformar(
             tabela = ajustar_woe(bin_dev, df_dev["y"])
             nome_woe = f"{base_semantica}_woe"
             woe_dev[nome_woe] = aplicar_woe(bin_dev, tabela)
-            woe_teste[nome_woe] = aplicar_woe(bin_teste, tabela)
+            woe_teste[nome_woe] = aplicar_woe(bin_teste, tabela, nome_coluna=coluna)
             iv_por_variavel[base_semantica] = tabela.iv_total
+            iv_teste_por_variavel[base_semantica] = avaliar_iv(bin_teste, df_teste["y"], tabela)
             if ao_processar_coluna is not None:
                 ao_processar_coluna(coluna, tabela.iv_total)
 
@@ -109,4 +128,9 @@ def categorizar_e_transformar(
             # -- não impede o cálculo das outras.
             continue
 
-    return pd.DataFrame(woe_dev), pd.DataFrame(woe_teste), iv_por_variavel
+    return ResultadoCategorizacao(
+        woe_dev=pd.DataFrame(woe_dev),
+        woe_teste=pd.DataFrame(woe_teste),
+        iv_dev_por_variavel=iv_por_variavel,
+        iv_teste_por_variavel=iv_teste_por_variavel,
+    )

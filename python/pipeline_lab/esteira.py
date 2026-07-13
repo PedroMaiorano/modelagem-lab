@@ -41,8 +41,8 @@ class EtapaForaDeOrdemError(RuntimeError):
 class Esteira:
     """Estado de uma esteira de modelagem em construção: `df_dev`/`df_teste`
     mais os artefatos que cada etapa produz, disponíveis como atributos pra
-    inspeção (`iv_por_variavel`, `colunas_geradas`, `resultado_selecao`,
-    `resultado_treinamento`).
+    inspeção (`iv_por_variavel`, `iv_teste_por_variavel`, `colunas_geradas`,
+    `resultado_selecao`, `resultado_treinamento`).
     """
 
     def __init__(self, df_dev: pd.DataFrame, df_teste: pd.DataFrame) -> None:
@@ -50,6 +50,7 @@ class Esteira:
         self.df_teste = df_teste
         self.colunas_geradas: dict[str, list[str]] = {}
         self.iv_por_variavel: dict[str, float] | None = None
+        self.iv_teste_por_variavel: dict[str, float] | None = None
         self.resultado_selecao: dict[str, Any] | None = None
         self.resultado_treinamento: ResultadoTreinamento | None = None
         self._categorizado = False
@@ -133,10 +134,15 @@ class Esteira:
     def categorizar_e_transformar(self, **kwargs: Any) -> Esteira:
         """Binning monotônico + WOE/IV -- sempre a última etapa antes da
         pré-seleção/treinamento. Ver
-        `pipeline_lab.categorizar.categorizar_e_transformar`."""
-        self.df_dev, self.df_teste, self.iv_por_variavel = categorizar.categorizar_e_transformar(
-            self.df_dev, self.df_teste, **kwargs
-        )
+        `pipeline_lab.categorizar.categorizar_e_transformar`. Preenche
+        `iv_por_variavel` (dev, usado por `pre_selecionar`) e
+        `iv_teste_por_variavel` (diagnóstico -- compare os dois pra flagar
+        variável com bin overfitado)."""
+        resultado = categorizar.categorizar_e_transformar(self.df_dev, self.df_teste, **kwargs)
+        self.df_dev = resultado.woe_dev
+        self.df_teste = resultado.woe_teste
+        self.iv_por_variavel = resultado.iv_dev_por_variavel
+        self.iv_teste_por_variavel = resultado.iv_teste_por_variavel
         self._categorizado = True
         return self
 

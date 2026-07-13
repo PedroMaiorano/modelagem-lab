@@ -36,19 +36,19 @@ def test_coluna_binaria_nao_e_descartada() -> None:
     df_dev, df_teste = _base_com_flag_binaria()
     fila: queue.Queue[dict[str, Any]] = queue.Queue()
 
-    woe_dev, woe_teste, iv_por_variavel = _categorizar_e_transformar(df_dev, df_teste, fila)
+    resultado = _categorizar_e_transformar(df_dev, df_teste, fila)
 
-    assert "flag_regra" in iv_por_variavel
-    assert "flag_regra_woe" in woe_dev.columns
-    assert "flag_regra_woe" in woe_teste.columns
-    assert iv_por_variavel["flag_regra"] > 0.02  # sinal real construído no fixture
+    assert "flag_regra" in resultado.iv_dev_por_variavel
+    assert "flag_regra_woe" in resultado.woe_dev.columns
+    assert "flag_regra_woe" in resultado.woe_teste.columns
+    assert resultado.iv_dev_por_variavel["flag_regra"] > 0.02  # sinal real construído no fixture
 
 
 def test_coluna_continua_ainda_e_categorizada_normalmente() -> None:
     df_dev, df_teste = _base_com_flag_binaria()
     fila: queue.Queue[dict[str, Any]] = queue.Queue()
 
-    woe_dev, _, iv_por_variavel = _categorizar_e_transformar(df_dev, df_teste, fila)
+    resultado = _categorizar_e_transformar(df_dev, df_teste, fila)
 
-    assert "idade" in iv_por_variavel
-    assert "idade_woe" in woe_dev.columns
+    assert "idade" in resultado.iv_dev_por_variavel
+    assert "idade_woe" in resultado.woe_dev.columns
